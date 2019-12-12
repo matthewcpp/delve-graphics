@@ -3,4 +3,5 @@ glfw/3.3@bincrafters/stable
 glm/0.9.9.5@g-truc/stable
 
 [generators]
-cmake_multi
+cmake_find_package
+cmake_paths

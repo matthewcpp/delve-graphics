@@ -11,8 +11,7 @@ You will need to have Conan and Cmake installed.
 mkdir build && cd build
 
 # Install package dependencies from conan
-conan install -g cmake_multi -s build_type=Release ..
-conan install -g cmake_multi -s build_type=Debug ..
+conan install ..
 
 # Generate project files, ensuring that the path to the Vulkan SDK is specified
 cmake .. -DVULKAN_SDK=/path/to/vulcan/sdk

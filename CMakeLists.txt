@@ -9,7 +9,7 @@ include(${CMAKE_BINARY_DIR}/conan_paths.cmake)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 if (DEFINED VULKAN_SDK)
-	message("Using Vulcan SDK: ${VULKAN_SDK}")
+	message("Using Vulkan SDK: ${VULKAN_SDK}")
 else()
 	message(FATAL_ERROR "You you must specify the VULKAN_SDK path")
 endif()

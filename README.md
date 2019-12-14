@@ -14,7 +14,7 @@ mkdir build && cd build
 conan install ..
 
 # Generate project files, ensuring that the path to the Vulkan SDK is specified
-cmake .. -DVULKAN_SDK=/path/to/vulcan/sdk
+cmake .. -DVULKAN_SDK=/path/to/vulkan/sdk
 ```
 ### Ubuntu
 Install the following development packages

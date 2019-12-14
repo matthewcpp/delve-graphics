@@ -44,7 +44,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     return VK_FALSE; // If true, call that generated callback should be aborted.  This should always be false.
 }
 
-class HelloTriangleApplication {
+class VulkanTestApplication {
 private:
 
     static void initMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
@@ -236,7 +236,7 @@ private:
         }
         else {
             int width, height;
-            glfwGetFramebufferSize(window, &width, &height);
+            glfwGetFramebufferSize(_glfwWindow, &width, &height);
             VkExtent2D actualExtent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height) };
 
             return actualExtent;
@@ -407,7 +407,7 @@ private:
     }
 
     void createSurface() {
-        if (glfwCreateWindowSurface(_instance, window, nullptr, &_surface) != VK_SUCCESS) {
+        if (glfwCreateWindowSurface(_instance, _glfwWindow, nullptr, &_surface) != VK_SUCCESS) {
             throw std::runtime_error("failure creating window surface");
         }
     }
@@ -871,19 +871,26 @@ private:
     }
 
 
-    static void glfwFramebufferResizeCallback(GLFWwindow* window, int width, int height) {
-        auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+    static void glfwFramebufferResizeCallback(GLFWwindow* _glfwWindow, int width, int height) {
+        auto app = reinterpret_cast<VulkanTestApplication*>(glfwGetWindowUserPointer(_glfwWindow));
         app->_glfwFramebufferResized = true;
     }
 
     void initWindow() {
-        glfwInit();
+        auto result = glfwInit();
+        if (result == GLFW_FALSE) {
+            throw std::runtime_error("failed it initialize GLFW.");
+        }
 
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // Signal GLFW to not create openGL context
-        window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+        _glfwWindow = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
 
-        glfwSetWindowUserPointer(window, this);
-        glfwSetFramebufferSizeCallback(window, glfwFramebufferResizeCallback);
+        if (!_glfwWindow) {
+            throw std::runtime_error("failed to create GLFW window");
+        }
+
+        glfwSetWindowUserPointer(_glfwWindow, this);
+        glfwSetFramebufferSizeCallback(_glfwWindow, glfwFramebufferResizeCallback);
     }
 
     void initVulkan() {
@@ -903,10 +910,11 @@ private:
     }
 
     void recreateSwapChain() {
+        // This code handles the case where glfw is processing a minimize event
         int width = 0, height = 0;
-        glfwGetFramebufferSize(window, &width, &height);
+        glfwGetFramebufferSize(_glfwWindow, &width, &height);
         while (width == 0 || height == 0) {
-            glfwGetFramebufferSize(window, &width, &height);
+            glfwGetFramebufferSize(_glfwWindow, &width, &height);
             glfwWaitEvents();
         }
 
@@ -923,7 +931,7 @@ private:
     }
 
     void mainLoop() {
-        while (!glfwWindowShouldClose(window)) {
+        while (!glfwWindowShouldClose(_glfwWindow)) {
             glfwPollEvents();
             drawFrame();
         }
@@ -965,8 +973,8 @@ private:
         vkDestroySurfaceKHR(_instance, _surface, nullptr);
         vkDestroyInstance(_instance, nullptr);
 
-        if (window) {
-            glfwDestroyWindow(window);
+        if (_glfwWindow) {
+            glfwDestroyWindow(_glfwWindow);
         }
 
         glfwTerminate();
@@ -981,7 +989,7 @@ public:
     }
 
 private:
-    GLFWwindow* window = nullptr;
+    GLFWwindow* _glfwWindow = nullptr;
 
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
@@ -1015,7 +1023,7 @@ private:
 };
 
 int main() {
-    HelloTriangleApplication app;
+    VulkanTestApplication app;
 
     try {
         app.run();

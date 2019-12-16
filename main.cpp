@@ -1,6 +1,8 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include <glm/glm.hpp>
+
 #include <iostream>
 #include <stdexcept>
 #include <functional>
@@ -10,11 +12,14 @@
 #include <set>
 #include <limits>
 #include <fstream>
+#include <vector>
+#include <array>
+
 #include <string.h>
 
 constexpr int WIDTH = 800;
 constexpr int HEIGHT = 600;
-constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+constexpr int MAX_SIMULTANEOUS_FRAMES = 2;
 
 const std::vector<const char*> requiredValidationLayers = {
     "VK_LAYER_KHRONOS_validation", "VK_LAYER_LUNARG_standard_validation"
@@ -23,12 +28,6 @@ const std::vector<const char*> requiredValidationLayers = {
 const std::vector<const char*> requiredDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
-
-#ifdef NDEBUG
-const bool enableValidationLayers = false;
-#else
-const bool enableValidationLayers = true;
-#endif
 
 // Note that creation of the debug callback is optional.
 // By default, if validation layers are enabled and no debug callback is set, Vulkan will output to standard out.
@@ -43,6 +42,46 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 
     return VK_FALSE; // If true, call that generated callback should be aborted.  This should always be false.
 }
+
+struct Vertex {
+    glm::vec2 pos;
+    glm::vec3 color;
+
+    static VkVertexInputBindingDescription getBindingDescription() {
+        // describes the format of the vertex
+        VkVertexInputBindingDescription bindingDescription = {};
+        bindingDescription.binding = 0;  // describes position in array of bindings
+        bindingDescription.stride = sizeof(Vertex);
+        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        return bindingDescription;
+    }
+
+    // attribute descriptions...describe the attributes of the vertex, i.e. position and color,
+    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions = {};
+
+        // describe position
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0; //location in the shader ie. layout(LOCATION = 0) etc
+        attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+        attributeDescriptions[0].offset = 0;
+
+        //describe vertex color
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attributeDescriptions[1].offset = sizeof(glm::vec2);
+
+        return attributeDescriptions;
+    }
+};
+
+const std::vector<Vertex> vertices = {
+    {{0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
+    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
 
 class VulkanTestApplication {
 private:
@@ -80,7 +119,7 @@ private:
         // Note this messenger will be cleaned up by the system.
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
         auto supportedValidationLayers = getSupportedValidationLayers();
-        if (enableValidationLayers) {
+        if (_enableValidation) {
             if (supportedValidationLayers.empty()) {
                 throw std::runtime_error("No supported validation layers found");
             }
@@ -413,7 +452,7 @@ private:
     }
 
     void enableLogging() {
-        if (!enableValidationLayers) return;
+        if (!_enableValidation) return;
 
         VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
         initMessengerCreateInfo(createInfo);
@@ -430,7 +469,7 @@ private:
     }
 
     void terminateLogging() {
-        if (!enableValidationLayers) return;
+        if (!_enableValidation) return;
 
         auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(_instance, "vkDestroyDebugUtilsMessengerEXT");
 
@@ -548,6 +587,56 @@ private:
         }
     }
 
+    // search though all the available memory types to find the index of correct source
+    // note that the memory type must be a match as well as the required properties (such as write access, etc)
+    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+        VkPhysicalDeviceMemoryProperties memProperties;
+        vkGetPhysicalDeviceMemoryProperties(_physicalDevice, &memProperties);
+
+        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+            if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+                return i;
+            }
+        }
+
+        throw std::runtime_error("failed to find suitable memory type!");
+    }
+
+    void createVertexBuffer() {
+        VkBufferCreateInfo vertexBufferInfo = {};
+        vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        vertexBufferInfo.size = sizeof(Vertex) * vertices.size(); // buffer size in bytes
+        vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        if (vkCreateBuffer(_device, &vertexBufferInfo, nullptr, &_vertexBuffer) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create vertex buffer");
+        }
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(_device, _vertexBuffer, &memoryRequirements);
+
+        // describe the memory we want to allocate into the buffer
+        VkMemoryAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memoryRequirements.size;
+        allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        if (vkAllocateMemory(_device, &allocInfo, nullptr, &_vertexBufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("falied to allocate vertex buffer memory.");
+        }
+
+        //now that memory is allocated, associate it with vertex buffer we just made above
+        if (vkBindBufferMemory(_device, _vertexBuffer, _vertexBufferMemory, 0) != VK_SUCCESS) {
+            throw std::runtime_error("failed to bind memory to buffer");
+        }
+
+        void* data;
+        vkMapMemory(_device, _vertexBufferMemory, 0, vertexBufferInfo.size, 0, &data);
+        memcpy(data, vertices.data(), static_cast<size_t>(vertexBufferInfo.size));
+        vkUnmapMemory(_device, _vertexBufferMemory);
+    }
+
     void createGraphicsPipeline() {
         auto vertexShaderCode = readFile("shaders/shader.vert.spv");
         auto fragmentShaderCode = readFile("shaders/shader.frag.spv");
@@ -570,13 +659,17 @@ private:
 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertexStage, fragmentStage };
 
+        // get the data structures for binding the array and also describing its attributes.  See vertex struct.
+        const auto bindingDescription = Vertex::getBindingDescription();
+        const auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
         // describe the input format of vertex data
         VkPipelineVertexInputStateCreateInfo vertexInput = {};
         vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertexInput.vertexBindingDescriptionCount = 0;
-        vertexInput.pVertexBindingDescriptions = nullptr;
-        vertexInput.vertexAttributeDescriptionCount = 0;
-        vertexInput.pVertexAttributeDescriptions = nullptr;
+        vertexInput.vertexBindingDescriptionCount = 1;
+        vertexInput.pVertexBindingDescriptions = &bindingDescription;
+        vertexInput.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+        vertexInput.pVertexAttributeDescriptions = attributeDescriptions.data();
 
         // define the type of primitive we will be drawing
         VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
@@ -763,7 +856,13 @@ private:
 
             vkCmdBeginRenderPass(_commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
-            vkCmdDraw(_commandBuffers[i], 3, 1, 0, 0);
+
+            VkBuffer vertexBuffers[] = { _vertexBuffer };
+            VkDeviceSize offsets[] = { 0 };
+            vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
+
+            vkCmdDraw(_commandBuffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+
             vkCmdEndRenderPass(_commandBuffers[i]);
 
             if (vkEndCommandBuffer(_commandBuffers[i]) != VK_SUCCESS) {
@@ -773,9 +872,9 @@ private:
     }
 
     void createSyncObjects() {
-        _imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        _renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
-        _inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+        _imageAvailableSemaphores.resize(MAX_SIMULTANEOUS_FRAMES);
+        _renderFinishedSemaphores.resize(MAX_SIMULTANEOUS_FRAMES);
+        _inFlightFences.resize(MAX_SIMULTANEOUS_FRAMES);
         _inFLightImages.resize(_swapChainImages.size(), VK_NULL_HANDLE);
 
         VkSemaphoreCreateInfo semaphoreInfo = {};
@@ -785,7 +884,7 @@ private:
         fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
             if (vkCreateSemaphore(_device, &semaphoreInfo, nullptr, &_imageAvailableSemaphores[i]) != VK_SUCCESS ||
                 vkCreateSemaphore(_device, &semaphoreInfo, NULL, &_renderFinishedSemaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(_device, &fenceInfo, nullptr, &_inFlightFences[i]) != VK_SUCCESS) {
@@ -867,7 +966,7 @@ private:
             throw std::runtime_error("failed to present swap chain image");
         }
 
-        currentFrameIndex = (currentFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+        currentFrameIndex = (currentFrameIndex + 1) % MAX_SIMULTANEOUS_FRAMES;
     }
 
 
@@ -905,6 +1004,7 @@ private:
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
+        createVertexBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -960,7 +1060,10 @@ private:
     void cleanup() {
         cleanupSwapChain();
 
-        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroyBuffer(_device, _vertexBuffer, nullptr);
+        vkFreeMemory(_device, _vertexBufferMemory, nullptr);
+
+        for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
             vkDestroySemaphore(_device, _renderFinishedSemaphores[i], nullptr);
             vkDestroySemaphore(_device, _imageAvailableSemaphores[i], nullptr);
             vkDestroyFence(_device, _inFlightFences[i], nullptr);
@@ -987,6 +1090,8 @@ public:
         mainLoop();
         cleanup();
     }
+
+    inline void enableValidationLayers(bool enableValidation) { _enableValidation = enableValidation; }
 
 private:
     GLFWwindow* _glfwWindow = nullptr;
@@ -1019,11 +1124,21 @@ private:
     std::vector<VkFence> _inFLightImages;
     size_t currentFrameIndex = 0;
 
+    VkBuffer _vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory _vertexBufferMemory = VK_NULL_HANDLE;
+
     bool _glfwFramebufferResized = false;
+    bool _enableValidation = false;
 };
 
-int main() {
+int main(int argc, char** argv) {
     VulkanTestApplication app;
+
+#if NDEBUG
+    app.enableValidationLayers(false);
+#else
+    app.enableValidationLayers(true);
+#endif
 
     try {
         app.run();

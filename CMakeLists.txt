@@ -24,3 +24,5 @@ set_target_properties(vulkantest PROPERTIES
 	CXX_STANDARD_REQUIRED ON)
 
 target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm)
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_all_shaders.in ${CMAKE_CURRENT_BINARY_DIR}/compile_all_shaders.sh @ONLY)

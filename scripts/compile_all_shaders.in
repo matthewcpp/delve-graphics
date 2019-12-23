@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+vk_glsl_compiler=@Vulkan_GLSL_COMPILER@
+base_dir=@PROJECT_SOURCE_DIR@
+output_dir=@CMAKE_BINARY_DIR@
+
+declare -a shader_folders=("shaders")
+
+for i in "${shader_folders[@]}"
+do
+   python "$base_dir/scripts/compile_shaders.py" "$vk_glsl_compiler" "$base_dir/$i" "$output_dir/$i"
+done

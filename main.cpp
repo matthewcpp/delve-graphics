@@ -602,39 +602,96 @@ private:
         throw std::runtime_error("failed to find suitable memory type!");
     }
 
-    void createVertexBuffer() {
+    // copying a vertex buffer requires a transfer command.  We will need to create a temporary command buffer to execute the command
+    // Ideally it would be useful to create a separate command pool for short lived transfer operations like this as opposed to using the main command pool.
+    // note that we are using the graphics queue to perform copies.  this is because graphics queues must also support buffer copy operations.
+    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+        VkCommandBufferAllocateInfo commandBufferAllocInfo = {};
+        commandBufferAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        commandBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        commandBufferAllocInfo.commandPool = _commandPool;
+        commandBufferAllocInfo.commandBufferCount = 1;
+
+        VkCommandBuffer commandBuffer;
+        vkAllocateCommandBuffers(_device, &commandBufferAllocInfo, &commandBuffer);
+
+        VkCommandBufferBeginInfo beginInfo = {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+        VkBufferCopy regionToCopy = {}; // copy the whole buffer in one shot
+        regionToCopy.srcOffset = 0;
+        regionToCopy.dstOffset = 0;
+        regionToCopy.size = size;
+        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &regionToCopy);
+
+        vkEndCommandBuffer(commandBuffer);
+
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        vkQueueSubmit(_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(_graphicsQueue);
+
+        vkFreeCommandBuffers(_device, _commandPool, 1, &commandBuffer);
+    }
+
+    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
         VkBufferCreateInfo vertexBufferInfo = {};
         vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        vertexBufferInfo.size = sizeof(Vertex) * vertices.size(); // buffer size in bytes
-        vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        vertexBufferInfo.size = size; // buffer size in bytes
+        vertexBufferInfo.usage = usage;
         vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        if (vkCreateBuffer(_device, &vertexBufferInfo, nullptr, &_vertexBuffer) != VK_SUCCESS) {
+        if (vkCreateBuffer(_device, &vertexBufferInfo, nullptr, &buffer) != VK_SUCCESS) {
             throw std::runtime_error("failed to create vertex buffer");
         }
 
         VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(_device, _vertexBuffer, &memoryRequirements);
+        vkGetBufferMemoryRequirements(_device, buffer, &memoryRequirements);
 
         // describe the memory we want to allocate into the buffer
         VkMemoryAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocInfo.allocationSize = memoryRequirements.size;
-        allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, properties);
 
-        if (vkAllocateMemory(_device, &allocInfo, nullptr, &_vertexBufferMemory) != VK_SUCCESS) {
-            throw std::runtime_error("falied to allocate vertex buffer memory.");
+        if (vkAllocateMemory(_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate vertex buffer memory.");
         }
 
         //now that memory is allocated, associate it with vertex buffer we just made above
-        if (vkBindBufferMemory(_device, _vertexBuffer, _vertexBufferMemory, 0) != VK_SUCCESS) {
+        if (vkBindBufferMemory(_device, buffer, bufferMemory, 0) != VK_SUCCESS) {
             throw std::runtime_error("failed to bind memory to buffer");
         }
+    }
 
-        void* data;
-        vkMapMemory(_device, _vertexBufferMemory, 0, vertexBufferInfo.size, 0, &data);
-        memcpy(data, vertices.data(), static_cast<size_t>(vertexBufferInfo.size));
-        vkUnmapMemory(_device, _vertexBufferMemory);
+    void createVertexBuffer() {
+        // create a temporary CPU visible staging buffer to copy vertex data to the GPU (device local)
+        const auto bufferSize = static_cast<VkDeviceSize>(sizeof(Vertex) * vertices.size());
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        // copy the vertex data into the staging buffer
+        void* stagingBufferData = nullptr;
+        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &stagingBufferData);
+        memcpy(stagingBufferData, vertices.data(), static_cast<size_t>(bufferSize));
+        vkUnmapMemory(_device, stagingBufferMemory);
+
+        // create our vertex buffer which will hold data on the GPU
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _vertexBuffer, _vertexBufferMemory);
+
+        // copy the staging buffer to device local buffer
+        copyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
+
+        // cleanup staging buffer
+        vkDestroyBuffer(_device, stagingBuffer, nullptr);
+        vkFreeMemory(_device, stagingBufferMemory, nullptr);
     }
 
     void createGraphicsPipeline() {

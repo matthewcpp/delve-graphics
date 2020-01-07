@@ -78,9 +78,14 @@ struct Vertex {
 };
 
 const std::vector<Vertex> vertices = {
-    {{0.0f, -0.5f}, {1.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+        {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+        {{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+        {{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+        {{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> indices = {
+        0, 1, 2, 2, 3, 0
 };
 
 class VulkanTestApplication {
@@ -694,6 +699,24 @@ private:
         vkFreeMemory(_device, stagingBufferMemory, nullptr);
     }
 
+    void createIndexBuffer() {
+        const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint16_t) * indices.size());
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* stagingBufferData = nullptr;
+        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &stagingBufferData);
+        memcpy(stagingBufferData, indices.data(), static_cast<size_t>(bufferSize));
+        vkUnmapMemory(_device, stagingBufferMemory);
+
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _indexBuffer, _indexBufferMemory);
+        copyBuffer(stagingBuffer, _indexBuffer, bufferSize);
+
+        vkDestroyBuffer(_device, stagingBuffer, nullptr);
+        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+    }
+
     void createGraphicsPipeline() {
         auto vertexShaderCode = readFile("shaders/shader.vert.spv");
         auto fragmentShaderCode = readFile("shaders/shader.frag.spv");
@@ -916,9 +939,10 @@ private:
 
             VkBuffer vertexBuffers[] = { _vertexBuffer };
             VkDeviceSize offsets[] = { 0 };
-            vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
 
-            vkCmdDraw(_commandBuffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+            vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            vkCmdDrawIndexed(_commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
             vkCmdEndRenderPass(_commandBuffers[i]);
 
@@ -1062,6 +1086,7 @@ private:
         createFramebuffers();
         createCommandPool();
         createVertexBuffer();
+        createIndexBuffer();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -1116,6 +1141,9 @@ private:
 
     void cleanup() {
         cleanupSwapChain();
+
+        vkDestroyBuffer(_device, _indexBuffer, nullptr);
+        vkFreeMemory(_device, _indexBufferMemory, nullptr);
 
         vkDestroyBuffer(_device, _vertexBuffer, nullptr);
         vkFreeMemory(_device, _vertexBufferMemory, nullptr);
@@ -1183,6 +1211,8 @@ private:
 
     VkBuffer _vertexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory _vertexBufferMemory = VK_NULL_HANDLE;
+    VkBuffer _indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory _indexBufferMemory = VK_NULL_HANDLE;
 
     bool _glfwFramebufferResized = false;
     bool _enableValidation = false;

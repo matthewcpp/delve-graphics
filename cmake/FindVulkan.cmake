@@ -20,6 +20,8 @@ elseif (UNIX)
     set(vk_include_path x86_64/include)
     set(vk_library_name vulkan)
     set(vk_library_path x86_64/lib)
+    set(vk_glsl_compiler glslc)
+    set(vk_bin_dir x86_64/bin)
 endif()
 
 find_path(Vulkan_INCLUDE_DIR

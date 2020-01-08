@@ -1,7 +1,11 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 #include <iostream>
 #include <stdexcept>
@@ -86,6 +90,13 @@ const std::vector<Vertex> vertices = {
 
 const std::vector<uint16_t> indices = {
         0, 1, 2, 2, 3, 0
+};
+
+// alignas is used to be explicit in regards to vulkan alignment requirements.  mat4 should be aligned to multiples of 16 bytes
+struct UniformBufferObject {
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 view;
+    alignas(16) glm::mat4 proj;
 };
 
 class VulkanTestApplication {
@@ -717,6 +728,92 @@ private:
         vkFreeMemory(_device, stagingBufferMemory, nullptr);
     }
 
+    // a uniform buffer in our case is tired to a swap chain image
+    // note that since the uniform values will be changing every frame (MVP matrix) we do not need a staging buffer or device memory location bit
+    void createUniformBuffers(){
+        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+        _uniformBuffers.resize(_swapChainImages.size());
+        _uniformBuffersMemory.resize(_swapChainImages.size());
+
+        for (size_t i = 0; i < _uniformBuffers.size(); i++) {
+            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _uniformBuffers[i], _uniformBuffersMemory[i]);
+        }
+    }
+
+    void createDescriptorPool() {
+        VkDescriptorPoolSize poolSize = {};
+        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        poolSize.descriptorCount = static_cast<uint32_t>(_swapChainImages.size());
+
+        VkDescriptorPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.poolSizeCount = 1;
+        poolInfo.pPoolSizes = &poolSize;
+        poolInfo.maxSets = static_cast<uint32_t>(_swapChainImages.size());
+
+        if (vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_descriptorPool) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor pool.");
+        }
+
+    }
+
+    // note that you do not need to explicitly clean up descriptor sets because they will be freed when their pool is destroyed.
+    void createDescriptorSets() {
+        std::vector<VkDescriptorSetLayout> layouts(_swapChainImages.size(), _descriptorSetLayout);
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.descriptorPool = _descriptorPool;
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(_swapChainImages.size());
+        allocInfo.pSetLayouts = layouts.data();
+
+        _descriptorSets.resize(_swapChainImages.size());
+        if (vkAllocateDescriptorSets(_device, &allocInfo, _descriptorSets.data()) != VK_SUCCESS) {
+            throw std::runtime_error("failed to allocate descriptor sets");
+        }
+
+        // descriptor sets have been allocated but now need to be configured
+        for (size_t i = 0; i < _descriptorSets.size(); i++) {
+            VkDescriptorBufferInfo bufferInfo = {};
+            bufferInfo.buffer = _uniformBuffers[i];
+            bufferInfo.offset = 0;
+            bufferInfo.range = sizeof(UniformBufferObject);
+
+            VkWriteDescriptorSet descriptorWrite = {};
+            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrite.dstSet = _descriptorSets[i];
+            descriptorWrite.dstBinding = 0; // we gave our uniform buffer binding index 0 in the shader code
+            descriptorWrite.dstArrayElement = 0;
+            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrite.descriptorCount = 1;
+            descriptorWrite.pBufferInfo = &bufferInfo; // we are describing a buffer object so we are using this field
+            descriptorWrite.pImageInfo = nullptr; // used for descriptors that refer to image data
+            descriptorWrite.pTexelBufferView = nullptr; // used for descriptors that refer to buffer views
+
+            vkUpdateDescriptorSets(_device, 1, &descriptorWrite, 0, nullptr);
+        }
+    }
+
+    // We need to provide details about every descriptor binding used in the shaders for pipeline creation
+    // note that the descriptor set remains valid even when creating new pipelines.
+    void createDescriptorSetLayout() {
+        VkDescriptorSetLayoutBinding uboLayoutBinding = {};
+        uboLayoutBinding.binding = 0; // refers to binding 0 from the vertex shader
+        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboLayoutBinding.descriptorCount = 1; // if an array, specifies the number of items in the array
+        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // specify which shaders are accessing the binding
+        uboLayoutBinding.pImmutableSamplers = nullptr; // used for image sampling
+
+        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &uboLayoutBinding;
+
+        if (vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &_descriptorSetLayout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create descriptor set layout");
+        }
+    }
+
     void createGraphicsPipeline() {
         auto vertexShaderCode = readFile("shaders/shader.vert.spv");
         auto fragmentShaderCode = readFile("shaders/shader.frag.spv");
@@ -783,7 +880,7 @@ private:
         rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
         rasterizer.lineWidth = 1.0f; // note setting this above 1.0 requires enabling of widelines GPU feature
         rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // note that this is changed to counter clockwise due to Y-flip in projection matrix
 
         // add constant value to depth or a bias
         rasterizer.depthBiasEnable = VK_FALSE;
@@ -825,8 +922,8 @@ private:
 
         VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipelineLayoutInfo.setLayoutCount = 0; // Optional
-        pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+        pipelineLayoutInfo.setLayoutCount = 1; // Optional
+        pipelineLayoutInfo.pSetLayouts = &_descriptorSetLayout;
         pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
         pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 
@@ -942,6 +1039,10 @@ private:
 
             vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
             vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+            // descriptor sets are not unqiue to graphics pipeline.  Therefore we need to specify we are binding to graphics (as opposed to compute)
+            vkCmdBindDescriptorSets(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[i], 0, nullptr);
+
             vkCmdDrawIndexed(_commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
             vkCmdEndRenderPass(_commandBuffers[i]);
@@ -974,6 +1075,31 @@ private:
         }
     }
 
+    void updateUniformBuffer(uint32_t bufferIndex) {
+        // get the application time
+        static auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+        // define MVP
+        UniformBufferObject ubo = {};
+        ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        ubo.proj = glm::perspective(glm::radians(45.0f), _swapChainExtent.width / (float) _swapChainExtent.height, 0.1f, 10.0f);
+
+        // GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
+        // The easiest way to compensate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
+        // If you don't do this, then the image will be rendered upside down.
+        ubo.proj[1][1] *= -1;
+
+        // copy the MVP into the corresponding uniform buffer
+        // TODO: look into using push constants for a more efficent means of passing the uniform data to shaders
+        void* data = nullptr;
+        vkMapMemory(_device, _uniformBuffersMemory[bufferIndex], 0, sizeof(ubo), 0, &data);
+        memcpy(data, &ubo, sizeof(ubo));
+        vkUnmapMemory(_device, _uniformBuffersMemory[bufferIndex]);
+    }
+
     void drawFrame() {
         vkWaitForFences(_device, 1, &_inFlightFences[currentFrameIndex], VK_TRUE, std::numeric_limits<uint64_t>::max());
 
@@ -990,6 +1116,8 @@ private:
         else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to acquire swap chain image");
         }
+
+        updateUniformBuffer(imageIndex);
 
         // Check if a previous frame is using this image (i.e. there is its fence to wait on)
         if (_inFLightImages[imageIndex] != VK_NULL_HANDLE) {
@@ -1082,11 +1210,15 @@ private:
         createSwapChain();
         createImageViews();
         createRenderPass();
+        createDescriptorSetLayout();
         createGraphicsPipeline();
         createFramebuffers();
         createCommandPool();
         createVertexBuffer();
         createIndexBuffer();
+        createUniformBuffers();
+        createDescriptorPool();
+        createDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -1109,6 +1241,9 @@ private:
         createRenderPass();
         createGraphicsPipeline();
         createFramebuffers();
+        createUniformBuffers();
+        createDescriptorPool();
+        createDescriptorSets();
         createCommandBuffers();
     }
 
@@ -1137,10 +1272,19 @@ private:
         }
 
         vkDestroySwapchainKHR(_device, _swapchain, nullptr);
+
+        for (size_t i = 0; i < _uniformBuffers.size(); i++) {
+            vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
+            vkFreeMemory(_device, _uniformBuffersMemory[i], nullptr);
+        }
+
+        vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
     }
 
     void cleanup() {
         cleanupSwapChain();
+
+        vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
 
         vkDestroyBuffer(_device, _indexBuffer, nullptr);
         vkFreeMemory(_device, _indexBufferMemory, nullptr);
@@ -1197,6 +1341,7 @@ private:
     VkExtent2D _swapChainExtent;
 
     VkRenderPass _renderPass = VK_NULL_HANDLE;
+    VkDescriptorSetLayout _descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
     VkPipeline _graphicsPipeline;
 
@@ -1213,6 +1358,12 @@ private:
     VkDeviceMemory _vertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer _indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory _indexBufferMemory = VK_NULL_HANDLE;
+
+    std::vector<VkBuffer> _uniformBuffers;
+    std::vector<VkDeviceMemory> _uniformBuffersMemory;
+
+    VkDescriptorPool _descriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> _descriptorSets;
 
     bool _glfwFramebufferResized = false;
     bool _enableValidation = false;

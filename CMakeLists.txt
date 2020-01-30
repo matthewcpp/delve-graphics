@@ -18,12 +18,13 @@ find_package(Vulkan REQUIRED)
 find_package(glfw REQUIRED)
 find_package(glm REQUIRED)
 find_package(stb REQUIRED)
+find_package(tinyobjloader REQUIRED)
 
 add_executable(vulkantest main.cpp)
 set_target_properties(vulkantest PROPERTIES 
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED ON)
 
-target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb)
+target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb tinyobjloader::tinyobjloader)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_all_shaders.in ${CMAKE_CURRENT_BINARY_DIR}/compile_all_shaders.sh @ONLY)

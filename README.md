@@ -1,6 +1,6 @@
-# delve-graphics
+# delve-vulkan
 
-Graphics demos and shader programming
+Experimentation and demos with the Vulkan API
 
 ### Building
 You will need to download the [Vulkan SDK](https://vulkan.lunarg.com/).  

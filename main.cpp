@@ -421,6 +421,9 @@ private:
             }
         }
 
+        const auto maxMsaaSampleCount = getMaxSupportedSampleCount();
+        _msaaSamples = std::min(_msaaSamples, maxMsaaSampleCount);
+
         if (_physicalDevice == VK_NULL_HANDLE) {
             throw std::runtime_error("failed to find a suitable GPU");
         }
@@ -564,7 +567,7 @@ private:
     void createRenderPass() {
         VkAttachmentDescription colorAttachment = {};
         colorAttachment.format = _swapChainImageFormat;
-        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // multisampling
+        colorAttachment.samples = _msaaSamples; // multisampling
 
         // These apply to color and depth data
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // we will clear to black b4 rendering each frame
@@ -573,15 +576,11 @@ private:
         colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 
         colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // signals we will be presenting the image to surface in swap chain
-
-        VkAttachmentReference colorAttachmentRef = {};
-        colorAttachmentRef.attachment = 0;
-        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentDescription depthAttachment = {};
         depthAttachment.format = findDepthBufferFormat(); // this should be the same as the depth image itself
-        depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depthAttachment.samples = _msaaSamples;
         depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // clear depth buffer before rendering
         depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // currently not used after drawing has finished so we dont care how its stored.
         depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -589,16 +588,39 @@ private:
         depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+        // note that multisampled color attachments cannot be presented directly to the screen.  They need to be resolved to an regular image.
+        // this is not required for depth attachments because they are not presented to the screen!
+        // If MSAA is disabled then we should not create a resolve attachment.  Doing so will cause validation error
+        VkAttachmentDescription colorAttachmentResolve = {};
+        colorAttachmentResolve.format = _swapChainImageFormat;
+        colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // we need to convert the image to 1 sample per pixel
+        colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // signals we need this in a format that can be presented to the screen via swapchain.
+
+        std::array<VkAttachmentDescription, 3> attachmentDescriptions = { colorAttachment, depthAttachment, colorAttachmentResolve };
+
+        VkAttachmentReference colorAttachmentRef = {};
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
         VkAttachmentReference depthAttachmentReference = {};
         depthAttachmentReference.attachment = 1;
         depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+        VkAttachmentReference colorAttachmentResolveRef = {};
+        colorAttachmentResolveRef.attachment = 2;
+        colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkSubpassDescription subpass = {};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorAttachmentRef;
         subpass.pDepthStencilAttachment = &depthAttachmentReference; // note that subpass can only have 1 depth + stencil attachment
+        subpass.pResolveAttachments = &colorAttachmentResolveRef; // handles converting multisampled image to single sampled image for presentation
 
         // we need to configure the subpass of our renderpass to wait for the color attachment stage of the pipeline to begin
         // could also set waitStages for the imageAvailableSemaphore to VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
@@ -612,7 +634,6 @@ private:
         subpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-        std::array<VkAttachmentDescription, 2> attachmentDescriptions = { colorAttachment, depthAttachment };
         VkRenderPassCreateInfo renderPassInfo = {};
         renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
         renderPassInfo.attachmentCount = static_cast<uint32_t>(attachmentDescriptions.size());
@@ -858,7 +879,7 @@ private:
 
     // a uniform buffer in our case is tired to a swap chain image
     // note that since the uniform values will be changing every frame (MVP matrix) we do not need a staging buffer or device memory location bit
-    void createUniformBuffers(){
+    void createUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
         _uniformBuffers.resize(_swapChainImages.size());
@@ -1068,7 +1089,7 @@ private:
         VkPipelineMultisampleStateCreateInfo multisampling = {};
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisampling.sampleShadingEnable = VK_FALSE;
-        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        multisampling.rasterizationSamples = _msaaSamples;
         multisampling.minSampleShading = 1.0f; // Optional
         multisampling.pSampleMask = nullptr; // Optional
         multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
@@ -1140,7 +1161,7 @@ private:
 
         for (size_t i = 0; i < _swapChainImageViews.size(); i++) {
             // The color attachment differs for every swap chain image, but the same depth image can be used by all of them because only a single subpass is running at the same time due to our semaphores
-            std::array<VkImageView, 2> attachments = { _swapChainImageViews[i], _depthImageView };
+            std::array<VkImageView, 3> attachments = { _msaaColorImageView, _depthImageView, _swapChainImageViews[i] };
 
             VkFramebufferCreateInfo framebufferInfo = {};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -1219,7 +1240,7 @@ private:
             VkDeviceSize offsets[] = { 0 };
 
             vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
-            
+
             // note that the current sample model has index count > 65535 so we use uint32_t
             //vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
             vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT32);
@@ -1269,7 +1290,7 @@ private:
         UniformBufferObject ubo = {};
         ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), _swapChainExtent.width / (float) _swapChainExtent.height, 0.1f, 10.0f);
+        ubo.proj = glm::perspective(glm::radians(45.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 10.0f);
 
         // GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
         // The easiest way to compensate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
@@ -1385,7 +1406,7 @@ private:
         glfwSetFramebufferSizeCallback(_glfwWindow, glfwFramebufferResizeCallback);
     }
 
-    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usageFlags, VkMemoryPropertyFlags memoryPropertyFlags, VkImage& image, VkDeviceMemory& imageMemory) {
+    void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usageFlags, VkMemoryPropertyFlags memoryPropertyFlags, VkImage& image, VkDeviceMemory& imageMemory) {
         VkImageCreateInfo imageInfo = {};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1399,7 +1420,7 @@ private:
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // todo: understand more about transitions
         imageInfo.usage = usageFlags;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // only used by one queue family
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.samples = numSamples;
         imageInfo.flags = 0; // Optional
 
         if (vkCreateImage(_device, &imageInfo, nullptr, &image) != VK_SUCCESS) {
@@ -1455,7 +1476,7 @@ private:
         VkFormat depthFormat = findDepthBufferFormat();
 
         // create the image for the depth / stencil buffer
-        createImage(_swapChainExtent.width, _swapChainExtent.height, 1, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _depthImage, _depthImageMemory);
+        createImage(_swapChainExtent.width, _swapChainExtent.height, 1, _msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _depthImage, _depthImageMemory);
         _depthImageView = createImageView(_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
 
         // note this is optional
@@ -1529,7 +1550,7 @@ private:
         const VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
         // note that since we are generating mipmaps via vkCmdBlitImage we need to inform vulkan that image buffer will be both a source and destination of image operations
-        createImage(static_cast<uint32_t>(width), static_cast<uint32_t>(height), _mipLevels, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT| VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _textureImage, _textureImageMemory);
+        createImage(static_cast<uint32_t>(width), static_cast<uint32_t>(height), _mipLevels, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _textureImage, _textureImageMemory);
 
         // note: image was created with undefined layout in createImage function above
         // we will transition the image into a state where it can have the data loaded into it.
@@ -1545,7 +1566,6 @@ private:
             // now that the data is copied into the image, transition it to optimal read format
             transitionImageLayout(_textureImage, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, _mipLevels);
         }
-
 
         vkDestroyBuffer(_device, stagingBuffer, nullptr);
         vkFreeMemory(_device, stagingBufferMemory, nullptr);
@@ -1702,8 +1722,32 @@ private:
         if (vkCreateSampler(_device, &samplerInfo, nullptr, &_textureSampler) != VK_SUCCESS) {
             throw std::runtime_error("failed to create texture sampler.");
         }
+    }
 
+    // we need to find the max samples that are usable by both the color buff AND the depth buffer
+    VkSampleCountFlagBits getMaxSupportedSampleCount() {
+        VkPhysicalDeviceProperties physicalDeviceProperties;
+        vkGetPhysicalDeviceProperties(_physicalDevice, &physicalDeviceProperties);
 
+        VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+
+        if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+        if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+        if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+        if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+        if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+        if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+        return VK_SAMPLE_COUNT_1_BIT;
+    }
+
+    // create the multisampled color image buffer.  Note that multisampled images should not have multiple mip levels (enforced by the spec)
+    // We are only ever rendering one image at a time, so only one multisampled image is needed
+    void createMsaaColorResources() {
+        const VkFormat imageFormat = _swapChainImageFormat;
+
+        createImage(_swapChainExtent.width, _swapChainExtent.height, 1, _msaaSamples, imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _msaaColorImage, _msaaColorImageMemory);
+        _msaaColorImageView = createImageView(_msaaColorImage, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     }
 
     void initVulkan() {
@@ -1718,6 +1762,7 @@ private:
         createDescriptorSetLayout();
         createGraphicsPipeline();
         createCommandPool();
+        createMsaaColorResources();
         createDepthResources();
         createFramebuffers();
         createTextureImage();
@@ -1750,6 +1795,7 @@ private:
         createImageViews();
         createRenderPass();
         createGraphicsPipeline();
+        createMsaaColorResources();
         createDepthResources();
         createFramebuffers();
         createUniformBuffers();
@@ -1768,6 +1814,10 @@ private:
     }
 
     void cleanupSwapChain() {
+        vkDestroyImageView(_device, _msaaColorImageView, nullptr);
+        vkDestroyImage(_device, _msaaColorImage, nullptr);
+        vkFreeMemory(_device, _msaaColorImageMemory, nullptr);
+
         vkDestroyImageView(_device, _depthImageView, nullptr);
         vkDestroyImage(_device, _depthImage, nullptr);
         vkFreeMemory(_device, _depthImageMemory, nullptr);
@@ -1895,6 +1945,11 @@ private:
     VkDeviceMemory _depthImageMemory = VK_NULL_HANDLE;
     VkImageView _depthImageView = VK_NULL_HANDLE;
 
+    VkSampleCountFlagBits _msaaSamples = VK_SAMPLE_COUNT_4_BIT;
+    VkImage _msaaColorImage = VK_NULL_HANDLE;
+    VkDeviceMemory _msaaColorImageMemory = VK_NULL_HANDLE;
+    VkImageView _msaaColorImageView = VK_NULL_HANDLE;
+
     bool _glfwFramebufferResized = false;
     bool _enableValidation = false;
 
@@ -1914,7 +1969,7 @@ int main(int argc, char** argv) {
     try {
         app.run();
     }
-    catch (const std::exception& e) {
+    catch (const std::exception & e) {
         std::cerr << e.what() << std::endl;
         return EXIT_FAILURE;
     }

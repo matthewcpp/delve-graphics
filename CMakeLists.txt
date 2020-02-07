@@ -9,7 +9,7 @@ include(${CMAKE_BINARY_DIR}/conan_paths.cmake)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 if (DEFINED VULKAN_SDK)
-	message("Using Vulcan SDK: ${VULKAN_SDK}")
+	message("Using Vulkan SDK: ${VULKAN_SDK}")
 else()
 	message(FATAL_ERROR "You you must specify the VULKAN_SDK path")
 endif()
@@ -17,10 +17,14 @@ endif()
 find_package(Vulkan REQUIRED)
 find_package(glfw REQUIRED)
 find_package(glm REQUIRED)
+find_package(stb REQUIRED)
+find_package(tinyobjloader REQUIRED)
 
 add_executable(vulkantest main.cpp)
 set_target_properties(vulkantest PROPERTIES 
 	CXX_STANDARD 17
 	CXX_STANDARD_REQUIRED ON)
 
-target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm)
+target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb tinyobjloader::tinyobjloader)
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_all_shaders.in ${CMAKE_CURRENT_BINARY_DIR}/compile_all_shaders.sh @ONLY)

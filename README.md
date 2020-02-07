@@ -14,7 +14,7 @@ mkdir build && cd build
 conan install ..
 
 # Generate project files, ensuring that the path to the Vulkan SDK is specified
-cmake .. -DVULKAN_SDK=/path/to/vulcan/sdk
+cmake .. -DVULKAN_SDK=/path/to/vulkan/sdk
 ```
 ### Ubuntu
 Install the following development packages
@@ -28,7 +28,7 @@ When running the application, ensure that the following environment variables ar
 
 | Name | Value |
 | ----------- | ----------- |
-| `DYLD_LIBRARY_PATH` | `<VULKAN_SDK>/MoltenVK/macOS/dynamic`
+| `DYLD_LIBRARY_PATH` | `<VULKAN_SDK>/macOS/lib`
 | `VK_ICD_FILENAMES` | `<VULKAN_SDK>/macOS/etc/vulkan/icd.d/MoltenVK_icd.json` |
 | `VK_LAYER_PATH` | `<VULKAN_SDK>/macOS/etc/vulkan/explicit_layer.d` |
 

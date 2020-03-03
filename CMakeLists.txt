@@ -1,4 +1,4 @@
-project(vulkandev)
+project(vkdev)
 cmake_minimum_required(VERSION 3.0)
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -21,8 +21,10 @@ find_package(stb REQUIRED)
 find_package(tinyobjloader REQUIRED)
 
 add_executable(vulkantest 
-    src/main.cpp 
+    src/main.cpp
+    include/vkdev/command.h src/command.cpp
     include/vkdev/image.h src/image.cpp
+    include/vkdev/queue.h src/queue.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
 )
 set_target_properties(vulkantest PROPERTIES 

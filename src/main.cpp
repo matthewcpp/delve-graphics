@@ -1,4 +1,5 @@
 #include "vkdev/swapchain.h"
+#include "vkdev/command.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -599,52 +600,20 @@ private:
         throw std::runtime_error("failed to find suitable memory type!");
     }
 
-    VkCommandBuffer createAndStartSingleUseCommandBuffer() {
-        VkCommandBufferAllocateInfo commandBufferAllocInfo = {};
-        commandBufferAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        commandBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        commandBufferAllocInfo.commandPool = _commandPool;
-        commandBufferAllocInfo.commandBufferCount = 1;
-
-        VkCommandBuffer commandBuffer;
-        vkAllocateCommandBuffers(_device, &commandBufferAllocInfo, &commandBuffer);
-
-        VkCommandBufferBeginInfo beginInfo = {};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-        return commandBuffer;
-    }
-
-    void submitAndFreeSingleUseCommandBuffer(VkCommandBuffer commandBuffer) {
-        vkEndCommandBuffer(commandBuffer);
-
-        VkSubmitInfo submitInfo = {};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &commandBuffer;
-
-        vkQueueSubmit(_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(_graphicsQueue);
-
-        vkFreeCommandBuffers(_device, _commandPool, 1, &commandBuffer);
-    }
-
     // copying a vertex buffer requires a transfer command.  We will need to create a temporary command buffer to execute the command
     // Ideally it would be useful to create a separate command pool for short lived transfer operations like this as opposed to using the main command pool.
     // note that we are using the graphics queue to perform copies.  this is because graphics queues must also support buffer copy operations.
     void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-        auto commandBuffer = createAndStartSingleUseCommandBuffer();
+        auto commandBuffer = commandPool->createSingleUseBuffer();
+        commandBuffer.start();
 
         VkBufferCopy regionToCopy = {}; // copy the whole buffer in one shot
         regionToCopy.srcOffset = 0;
         regionToCopy.dstOffset = 0;
         regionToCopy.size = size;
-        vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &regionToCopy);
+        vkCmdCopyBuffer(commandBuffer.handle, srcBuffer, dstBuffer, 1, &regionToCopy);
 
-        submitAndFreeSingleUseCommandBuffer(commandBuffer);
+        commandBuffer.submit(_graphicsQueue);
     }
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
@@ -678,7 +647,8 @@ private:
     }
 
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-        auto commandBuffer = createAndStartSingleUseCommandBuffer();
+        auto commandBuffer = commandPool->createSingleUseBuffer();
+        commandBuffer.start();
 
         VkBufferImageCopy region = {};
         region.bufferOffset = 0; // byte offset in buffer that pixel values start
@@ -693,13 +663,14 @@ private:
         region.imageOffset = { 0,0,0 };
         region.imageExtent = { width, height, 1 };
 
-        vkCmdCopyBufferToImage(commandBuffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vkCmdCopyBufferToImage(commandBuffer.handle, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-        submitAndFreeSingleUseCommandBuffer(commandBuffer);
+        commandBuffer.submit(_graphicsQueue);
     }
 
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) {
-        auto commandBuffer = createAndStartSingleUseCommandBuffer();
+        auto commandBuffer = commandPool->createSingleUseBuffer();
+        commandBuffer.start();
 
         VkImageMemoryBarrier barrier = {};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -760,13 +731,13 @@ private:
         }
 
         // describe which operations must happen before the barrier and which operations must wait on the barrier
-        vkCmdPipelineBarrier(commandBuffer,
+        vkCmdPipelineBarrier(commandBuffer.handle,
             sourceStage, destinationStage,
             0,
             0, nullptr,
             0, nullptr, 1, &barrier);
 
-        submitAndFreeSingleUseCommandBuffer(commandBuffer);
+        commandBuffer.submit(_graphicsQueue);
     }
 
     void createVertexBuffer() {
@@ -1117,15 +1088,8 @@ private:
     void createCommandPool() {
         auto queueFamilyIndicies = findQueueFamilies(_physicalDevice);
 
-        // command pool can only create commands on a particular type of queue.  In or case we are making graphics commands so needs to be associated with our graphics queue
-        VkCommandPoolCreateInfo poolInfo = {};
-        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        poolInfo.queueFamilyIndex = queueFamilyIndicies.graphicsFamily.value();
-        poolInfo.flags = 0;
-
-        if (vkCreateCommandPool(_device, &poolInfo, nullptr, &_commandPool) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create command pool");
-        }
+        commandPool = std::make_unique<vkdev::CommandPool>(_physicalDevice, _device, _surface);
+        commandPool->create();
     }
 
     // drawing commands involves binding a framebuffer, we will have to record a command buffer for every image in the swap chain.
@@ -1135,7 +1099,7 @@ private:
 
         VkCommandBufferAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        allocInfo.commandPool = _commandPool;
+        allocInfo.commandPool = commandPool->handle;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = static_cast<uint32_t>(_commandBuffers.size());
 
@@ -1517,7 +1481,8 @@ private:
             throw std::runtime_error("texture image format does not support linear which is required to generate mipmaps");
         }
 
-        VkCommandBuffer commandBuffer = createAndStartSingleUseCommandBuffer();
+        auto commandBuffer = commandPool->createSingleUseBuffer();
+        commandBuffer.start();
 
         VkImageMemoryBarrier barrier = {};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -1539,7 +1504,7 @@ private:
             barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
             barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-            vkCmdPipelineBarrier(commandBuffer,
+            vkCmdPipelineBarrier(commandBuffer.handle,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
                 0, nullptr,
                 0, nullptr,
@@ -1561,7 +1526,7 @@ private:
             blit.dstSubresource.baseArrayLayer = 0;
             blit.dstSubresource.layerCount = 1;
 
-            vkCmdBlitImage(commandBuffer,
+            vkCmdBlitImage(commandBuffer.handle,
                 image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 1, &blit,
@@ -1574,7 +1539,7 @@ private:
             barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
             barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-            vkCmdPipelineBarrier(commandBuffer,
+            vkCmdPipelineBarrier(commandBuffer.handle,
                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
                 0, nullptr,
                 0, nullptr,
@@ -1593,13 +1558,13 @@ private:
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-        vkCmdPipelineBarrier(commandBuffer,
+        vkCmdPipelineBarrier(commandBuffer.handle,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
             0, nullptr,
             0, nullptr,
             1, &barrier);
 
-        submitAndFreeSingleUseCommandBuffer(commandBuffer);
+        commandBuffer.submit(_graphicsQueue);
     }
 
     void createTextureImageView() {
@@ -1760,7 +1725,7 @@ private:
             vkDestroyFramebuffer(_device, framebuffer, nullptr);
         }
 
-        vkFreeCommandBuffers(_device, _commandPool, static_cast<uint32_t>(_commandBuffers.size()), _commandBuffers.data());
+        vkFreeCommandBuffers(_device, commandPool->handle, static_cast<uint32_t>(_commandBuffers.size()), _commandBuffers.data());
 
         vkDestroyPipeline(_device, _graphicsPipeline, nullptr);
         vkDestroyPipelineLayout(_device, _pipelineLayout, nullptr);
@@ -1798,7 +1763,7 @@ private:
             vkDestroyFence(_device, _inFlightFences[i], nullptr);
         }
 
-        vkDestroyCommandPool(_device, _commandPool, nullptr);
+        commandPool->cleanup();
 
         vkDestroyDevice(_device, nullptr);
         terminateLogging();
@@ -1841,7 +1806,7 @@ private:
     VkPipelineLayout _pipelineLayout = VK_NULL_HANDLE;
     VkPipeline _graphicsPipeline;
 
-    VkCommandPool _commandPool = VK_NULL_HANDLE;
+    std::unique_ptr<vkdev::CommandPool> commandPool;
     std::vector<VkCommandBuffer> _commandBuffers;
 
     std::vector<VkSemaphore> _imageAvailableSemaphores;

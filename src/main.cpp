@@ -1,3 +1,5 @@
+#include "vkdev/swapchain.h"
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -29,6 +31,7 @@
 #include <vector>
 #include <array>
 #include <unordered_map>
+#include <memory>
 
 #include <string.h>
 
@@ -327,79 +330,12 @@ private:
     }
 
     void createSwapChain() {
-        SwapChainSupportInfo info = getSwapChainSupportInfo(_physicalDevice);
+        swapchain = std::make_unique<vkdev::SwapChain>(_physicalDevice, _device, _surface);
 
-        auto surfaceFormat = chooseSwapSurfaceFormat(info.formats);
-        auto presentMode = chooseSwapPresentMode(info.presentModes);
-        auto extent = chooseSwapExtent(info.surfaceCapabilities);
+        glm::ivec2 framebufferSize;
+        glfwGetFramebufferSize(_glfwWindow, &framebufferSize.x, &framebufferSize.y);
 
-        // need to determine how many images to have int he swap chain.  Reccomendation is to use one more than the minimum
-        uint32_t imageCount = info.surfaceCapabilities.minImageCount + 1;
-
-        if (info.surfaceCapabilities.maxImageCount > 0) { // 0 signifies no maximum
-            imageCount = std::min(imageCount, info.surfaceCapabilities.maxImageCount);
-        }
-
-        // fill in the create info struct with the values from our choices above
-        VkSwapchainCreateInfoKHR swapChainInfo = {};
-        swapChainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-        swapChainInfo.surface = _surface;
-        swapChainInfo.minImageCount = imageCount;
-        swapChainInfo.imageFormat = surfaceFormat.format;
-        swapChainInfo.imageColorSpace = surfaceFormat.colorSpace;
-        swapChainInfo.imageExtent = extent;
-        swapChainInfo.imageArrayLayers = 1;
-        swapChainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // signifies we will be rendering into the image
-
-        QueueFamilyIndices indices = findQueueFamilies(_physicalDevice);
-
-        uint32_t indiciesArray[] = { indices.graphicsFamily.value(), indices.presentationFamily.value() };
-
-        // if the queue families are the same then we can set up exclusive sharing mode for the swap chain.
-        // This means that the queue for rendering and presentation are the same
-        // If not we specificy concurrent queues
-        if (indices.graphicsFamily == indices.presentationFamily) {
-            swapChainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            swapChainInfo.queueFamilyIndexCount = 0;
-            swapChainInfo.pQueueFamilyIndices = nullptr;
-        }
-        else {
-            swapChainInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-            swapChainInfo.queueFamilyIndexCount = 2;
-            swapChainInfo.pQueueFamilyIndices = indiciesArray;
-        }
-
-        swapChainInfo.preTransform = info.surfaceCapabilities.currentTransform; // allows for transforms such as rotate, etc...this sets default (no transform).
-        swapChainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-
-        swapChainInfo.presentMode = presentMode;
-        swapChainInfo.clipped = VK_TRUE; // optimiztion...but unable to read back pixels that are obscured by another window
-
-        swapChainInfo.oldSwapchain = VK_NULL_HANDLE;
-
-        if (vkCreateSwapchainKHR(_device, &swapChainInfo, nullptr, &_swapchain) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create swap chain");
-        }
-
-        uint32_t swapChainImageCount = 0;
-        vkGetSwapchainImagesKHR(_device, _swapchain, &swapChainImageCount, nullptr);
-
-        // resulting swap chain data is saved for ease future use.
-        _swapChainImages.resize(swapChainImageCount);
-        vkGetSwapchainImagesKHR(_device, _swapchain, &swapChainImageCount, _swapChainImages.data());
-
-        _swapChainImageFormat = surfaceFormat.format;
-        _swapChainExtent = extent;
-    }
-
-    // We do not access images directly, instead we use image views.
-    // This function creates image views for the swap change images
-    void createImageViews() {
-        _swapChainImageViews.resize(_swapChainImages.size());
-
-        for (size_t i = 0; i < _swapChainImages.size(); i++) {
-            _swapChainImageViews[i] = createImageView(_swapChainImages[i], _swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
-        }
+        swapchain->create(framebufferSize);
     }
 
     // By default we will query the available devices and pick the first suitable device
@@ -566,7 +502,7 @@ private:
 
     void createRenderPass() {
         VkAttachmentDescription colorAttachment = {};
-        colorAttachment.format = _swapChainImageFormat;
+        colorAttachment.format = swapchain->imageFormat;
         colorAttachment.samples = _msaaSamples; // multisampling
 
         // These apply to color and depth data
@@ -592,7 +528,7 @@ private:
         // this is not required for depth attachments because they are not presented to the screen!
         // If MSAA is disabled then we should not create a resolve attachment.  Doing so will cause validation error
         VkAttachmentDescription colorAttachmentResolve = {};
-        colorAttachmentResolve.format = _swapChainImageFormat;
+        colorAttachmentResolve.format = swapchain->imageFormat;
         colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // we need to convert the image to 1 sample per pixel
         colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -882,8 +818,8 @@ private:
     void createUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-        _uniformBuffers.resize(_swapChainImages.size());
-        _uniformBuffersMemory.resize(_swapChainImages.size());
+        _uniformBuffers.resize(swapchain->images.size());
+        _uniformBuffersMemory.resize(swapchain->images.size());
 
         for (size_t i = 0; i < _uniformBuffers.size(); i++) {
             createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _uniformBuffers[i], _uniformBuffersMemory[i]);
@@ -896,15 +832,15 @@ private:
         std::array< VkDescriptorPoolSize, 2> poolSizes = {};
 
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(_swapChainImages.size());
+        poolSizes[0].descriptorCount = static_cast<uint32_t>(swapchain->images.size());
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(_swapChainImages.size());
+        poolSizes[1].descriptorCount = static_cast<uint32_t>(swapchain->images.size());
 
         VkDescriptorPoolCreateInfo poolInfo = {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = static_cast<uint32_t>(_swapChainImages.size());
+        poolInfo.maxSets = static_cast<uint32_t>(swapchain->images.size());
 
         if (vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_descriptorPool) != VK_SUCCESS) {
             throw std::runtime_error("failed to create descriptor pool.");
@@ -913,14 +849,14 @@ private:
 
     // note that you do not need to explicitly clean up descriptor sets because they will be freed when their pool is destroyed.
     void createDescriptorSets() {
-        std::vector<VkDescriptorSetLayout> layouts(_swapChainImages.size(), _descriptorSetLayout);
+        std::vector<VkDescriptorSetLayout> layouts(swapchain->images.size(), _descriptorSetLayout);
         VkDescriptorSetAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = _descriptorPool;
-        allocInfo.descriptorSetCount = static_cast<uint32_t>(_swapChainImages.size());
+        allocInfo.descriptorSetCount = static_cast<uint32_t>(swapchain->images.size());
         allocInfo.pSetLayouts = layouts.data();
 
-        _descriptorSets.resize(_swapChainImages.size());
+        _descriptorSets.resize(swapchain->images.size());
         if (vkAllocateDescriptorSets(_device, &allocInfo, _descriptorSets.data()) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate descriptor sets");
         }
@@ -1054,14 +990,14 @@ private:
         VkViewport viewport = {};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
-        viewport.width = static_cast<float>(_swapChainExtent.width);
-        viewport.height = static_cast<float>(_swapChainExtent.height);
+        viewport.width = static_cast<float>(swapchain->extent.width);
+        viewport.height = static_cast<float>(swapchain->extent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
 
         VkRect2D scissor = {};
         scissor.offset = { 0,0 };
-        scissor.extent = _swapChainExtent;
+        scissor.extent = swapchain->extent;
 
         VkPipelineViewportStateCreateInfo viewportState = {};
         viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1157,19 +1093,19 @@ private:
     }
 
     void createFramebuffers() {
-        _swapChainFramebuffers.resize(_swapChainImageViews.size());
+        _swapChainFramebuffers.resize(swapchain->imageViews.size());
 
-        for (size_t i = 0; i < _swapChainImageViews.size(); i++) {
+        for (size_t i = 0; i < swapchain->imageViews.size(); i++) {
             // The color attachment differs for every swap chain image, but the same depth image can be used by all of them because only a single subpass is running at the same time due to our semaphores
-            std::array<VkImageView, 3> attachments = { _msaaColorImageView, _depthImageView, _swapChainImageViews[i] };
+            std::array<VkImageView, 3> attachments = { _msaaColorImageView, _depthImageView, swapchain->imageViews[i] };
 
             VkFramebufferCreateInfo framebufferInfo = {};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             framebufferInfo.renderPass = _renderPass;
             framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
             framebufferInfo.pAttachments = attachments.data();
-            framebufferInfo.width = _swapChainExtent.width;
-            framebufferInfo.height = _swapChainExtent.height;
+            framebufferInfo.width = swapchain->extent.width;
+            framebufferInfo.height = swapchain->extent.height;
             framebufferInfo.layers = 1;
 
             if (vkCreateFramebuffer(_device, &framebufferInfo, nullptr, &_swapChainFramebuffers[i]) != VK_SUCCESS) {
@@ -1223,7 +1159,7 @@ private:
             renderPassInfo.framebuffer = _swapChainFramebuffers[i];
 
             renderPassInfo.renderArea.offset = { 0, 0 };
-            renderPassInfo.renderArea.extent = _swapChainExtent;
+            renderPassInfo.renderArea.extent = swapchain->extent;
 
             // clear value order should correspond to order of attachments.
             std::array<VkClearValue, 2> clearValues = {};
@@ -1262,7 +1198,7 @@ private:
         _imageAvailableSemaphores.resize(MAX_SIMULTANEOUS_FRAMES);
         _renderFinishedSemaphores.resize(MAX_SIMULTANEOUS_FRAMES);
         _inFlightFences.resize(MAX_SIMULTANEOUS_FRAMES);
-        _inFLightImages.resize(_swapChainImages.size(), VK_NULL_HANDLE);
+        _inFLightImages.resize(swapchain->images.size(), VK_NULL_HANDLE);
 
         VkSemaphoreCreateInfo semaphoreInfo = {};
         semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -1290,7 +1226,7 @@ private:
         UniformBufferObject ubo = {};
         ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        ubo.proj = glm::perspective(glm::radians(45.0f), _swapChainExtent.width / (float)_swapChainExtent.height, 0.1f, 10.0f);
+        ubo.proj = glm::perspective(glm::radians(45.0f), swapchain->extent.width / (float)swapchain->extent.height, 0.1f, 10.0f);
 
         // GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted.
         // The easiest way to compensate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
@@ -1312,7 +1248,7 @@ private:
         // if there is an error we may need to recreate the swap chain.  I.E. Window is resized, etc.
         // we do not recreate swap chain in suboptimal state here because we have already acquired an image.  suboptimal return code is still considered a successful return value
         uint32_t imageIndex = 0;
-        VkResult result = vkAcquireNextImageKHR(_device, _swapchain, std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
+        VkResult result = vkAcquireNextImageKHR(_device, swapchain->handle, std::numeric_limits<uint64_t>::max(), _imageAvailableSemaphores[currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
 
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             recreateSwapChain();
@@ -1363,7 +1299,7 @@ private:
         presentInfo.waitSemaphoreCount = 1;
         presentInfo.pWaitSemaphores = signalSemaphores;
 
-        VkSwapchainKHR swapchains[] = { _swapchain };
+        VkSwapchainKHR swapchains[] = { swapchain->handle };
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = swapchains;
         presentInfo.pImageIndices = &imageIndex;
@@ -1476,7 +1412,7 @@ private:
         VkFormat depthFormat = findDepthBufferFormat();
 
         // create the image for the depth / stencil buffer
-        createImage(_swapChainExtent.width, _swapChainExtent.height, 1, _msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _depthImage, _depthImageMemory);
+        createImage(swapchain->extent.width, swapchain->extent.height, 1, _msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _depthImage, _depthImageMemory);
         _depthImageView = createImageView(_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
 
         // note this is optional
@@ -1744,9 +1680,9 @@ private:
     // create the multisampled color image buffer.  Note that multisampled images should not have multiple mip levels (enforced by the spec)
     // We are only ever rendering one image at a time, so only one multisampled image is needed
     void createMsaaColorResources() {
-        const VkFormat imageFormat = _swapChainImageFormat;
+        const VkFormat imageFormat = swapchain->imageFormat;
 
-        createImage(_swapChainExtent.width, _swapChainExtent.height, 1, _msaaSamples, imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _msaaColorImage, _msaaColorImageMemory);
+        createImage(swapchain->extent.width, swapchain->extent.height, 1, _msaaSamples, imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _msaaColorImage, _msaaColorImageMemory);
         _msaaColorImageView = createImageView(_msaaColorImage, imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
     }
 
@@ -1757,7 +1693,6 @@ private:
         pickPhysicalDevice();
         createLogicalDevice();
         createSwapChain();
-        createImageViews();
         createRenderPass();
         createDescriptorSetLayout();
         createGraphicsPipeline();
@@ -1792,7 +1727,6 @@ private:
         cleanupSwapChain();
 
         createSwapChain();
-        createImageViews();
         createRenderPass();
         createGraphicsPipeline();
         createMsaaColorResources();
@@ -1832,11 +1766,7 @@ private:
         vkDestroyPipelineLayout(_device, _pipelineLayout, nullptr);
         vkDestroyRenderPass(_device, _renderPass, nullptr);
 
-        for (auto imageView : _swapChainImageViews) {
-            vkDestroyImageView(_device, imageView, nullptr);
-        }
-
-        vkDestroySwapchainKHR(_device, _swapchain, nullptr);
+        swapchain->cleanup();
 
         for (size_t i = 0; i < _uniformBuffers.size(); i++) {
             vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
@@ -1903,12 +1833,8 @@ private:
     VkDebugUtilsMessengerEXT _debugMessenger = VK_NULL_HANDLE;
     VkSurfaceKHR _surface;
 
-    VkSwapchainKHR _swapchain = VK_NULL_HANDLE;
-    std::vector<VkImage> _swapChainImages;
-    std::vector<VkImageView> _swapChainImageViews;
+    std::unique_ptr<vkdev::SwapChain> swapchain;
     std::vector<VkFramebuffer> _swapChainFramebuffers;
-    VkFormat _swapChainImageFormat;
-    VkExtent2D _swapChainExtent;
 
     VkRenderPass _renderPass = VK_NULL_HANDLE;
     VkDescriptorSetLayout _descriptorSetLayout = VK_NULL_HANDLE;

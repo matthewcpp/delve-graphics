@@ -22,6 +22,7 @@ find_package(tinyobjloader REQUIRED)
 
 add_executable(vulkantest 
     src/main.cpp
+    include/vkdev/buffer.h src/buffer.cpp
     include/vkdev/command.h src/command.cpp
     include/vkdev/image.h src/image.cpp
     include/vkdev/queue.h src/queue.cpp

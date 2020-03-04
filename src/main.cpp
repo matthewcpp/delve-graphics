@@ -1,5 +1,7 @@
 #include "vkdev/swapchain.h"
 #include "vkdev/command.h"
+#include "vkdev/queue.h"
+#include "vkdev/buffer.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -553,67 +555,6 @@ private:
         }
     }
 
-    // search though all the available memory types to find the index of correct source
-    // note that the memory type must be a match as well as the required properties (such as write access, etc)
-    uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-        VkPhysicalDeviceMemoryProperties memProperties;
-        vkGetPhysicalDeviceMemoryProperties(_physicalDevice, &memProperties);
-
-        for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-            if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-                return i;
-            }
-        }
-
-        throw std::runtime_error("failed to find suitable memory type!");
-    }
-
-    // copying a vertex buffer requires a transfer command.  We will need to create a temporary command buffer to execute the command
-    // Ideally it would be useful to create a separate command pool for short lived transfer operations like this as opposed to using the main command pool.
-    // note that we are using the graphics queue to perform copies.  this is because graphics queues must also support buffer copy operations.
-    void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-        auto commandBuffer = commandPool->createSingleUseBuffer();
-        commandBuffer.start();
-
-        VkBufferCopy regionToCopy = {}; // copy the whole buffer in one shot
-        regionToCopy.srcOffset = 0;
-        regionToCopy.dstOffset = 0;
-        regionToCopy.size = size;
-        vkCmdCopyBuffer(commandBuffer.handle, srcBuffer, dstBuffer, 1, &regionToCopy);
-
-        commandBuffer.submit();
-    }
-
-    void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
-        VkBufferCreateInfo vertexBufferInfo = {};
-        vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        vertexBufferInfo.size = size; // buffer size in bytes
-        vertexBufferInfo.usage = usage;
-        vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        if (vkCreateBuffer(_device, &vertexBufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create vertex buffer");
-        }
-
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(_device, buffer, &memoryRequirements);
-
-        // describe the memory we want to allocate into the buffer
-        VkMemoryAllocateInfo allocInfo = {};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memoryRequirements.size;
-        allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, properties);
-
-        if (vkAllocateMemory(_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-            throw std::runtime_error("failed to allocate vertex buffer memory.");
-        }
-
-        //now that memory is allocated, associate it with vertex buffer we just made above
-        if (vkBindBufferMemory(_device, buffer, bufferMemory, 0) != VK_SUCCESS) {
-            throw std::runtime_error("failed to bind memory to buffer");
-        }
-    }
-
     void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
         auto commandBuffer = commandPool->createSingleUseBuffer();
         commandBuffer.start();
@@ -711,45 +652,43 @@ private:
     void createVertexBuffer() {
         // create a temporary CPU visible staging buffer to copy vertex data to the GPU (device local)
         const auto bufferSize = static_cast<VkDeviceSize>(sizeof(Vertex) * _vertices.size());
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        vkdev::Buffer stagingBuffer;
+        stagingBuffer.create(_physicalDevice, _device, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
         // copy the vertex data into the staging buffer
         void* stagingBufferData = nullptr;
-        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &stagingBufferData);
+        vkMapMemory(_device, stagingBuffer.memory, 0, bufferSize, 0, &stagingBufferData);
         memcpy(stagingBufferData, _vertices.data(), static_cast<size_t>(bufferSize));
-        vkUnmapMemory(_device, stagingBufferMemory);
+        vkUnmapMemory(_device, stagingBuffer.memory);
 
         // create our vertex buffer which will hold data on the GPU
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _vertexBuffer, _vertexBufferMemory);
+        vertexBuffer.create(_physicalDevice, _device, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         // copy the staging buffer to device local buffer
-        copyBuffer(stagingBuffer, _vertexBuffer, bufferSize);
+        vkdev::Buffer::copy(*commandPool, stagingBuffer, vertexBuffer);
 
         // cleanup staging buffer
-        vkDestroyBuffer(_device, stagingBuffer, nullptr);
-        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+        stagingBuffer.cleanup();
     }
 
     void createIndexBuffer() {
         // note current model is using uint32_t for indicies
         //const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint16_t) * indices.size());
         const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint32_t) * _indices.size());
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        vkdev::Buffer stagingBuffer;
+        stagingBuffer.create(_physicalDevice, _device, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
         void* stagingBufferData = nullptr;
-        vkMapMemory(_device, stagingBufferMemory, 0, bufferSize, 0, &stagingBufferData);
+        vkMapMemory(_device, stagingBuffer.memory, 0, bufferSize, 0, &stagingBufferData);
         memcpy(stagingBufferData, _indices.data(), static_cast<size_t>(bufferSize));
-        vkUnmapMemory(_device, stagingBufferMemory);
+        vkUnmapMemory(_device, stagingBuffer.memory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, _indexBuffer, _indexBufferMemory);
-        copyBuffer(stagingBuffer, _indexBuffer, bufferSize);
+        indexBuffer.create(_physicalDevice, _device, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vkdev::Buffer::copy(*commandPool, stagingBuffer, indexBuffer);
 
-        vkDestroyBuffer(_device, stagingBuffer, nullptr);
-        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+        stagingBuffer.cleanup();
     }
 
     // a uniform buffer in our case is tired to a swap chain image
@@ -757,11 +696,10 @@ private:
     void createUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-        _uniformBuffers.resize(swapchain->images.size());
-        _uniformBuffersMemory.resize(swapchain->images.size());
+        uniformBuffers.resize(swapchain->images.size());
 
-        for (size_t i = 0; i < _uniformBuffers.size(); i++) {
-            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, _uniformBuffers[i], _uniformBuffersMemory[i]);
+        for (size_t i = 0; i < uniformBuffers.size(); i++) {
+            uniformBuffers[i].create(_physicalDevice, _device, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         }
     }
 
@@ -803,7 +741,7 @@ private:
         // descriptor sets have been allocated but now need to be configured
         for (size_t i = 0; i < _descriptorSets.size(); i++) {
             VkDescriptorBufferInfo bufferInfo = {};
-            bufferInfo.buffer = _uniformBuffers[i];
+            bufferInfo.buffer = uniformBuffers[i].buffer;
             bufferInfo.offset = 0;
             bufferInfo.range = sizeof(UniformBufferObject);
 
@@ -1102,16 +1040,16 @@ private:
             vkCmdBeginRenderPass(_commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
 
-            VkBuffer vertexBuffers[] = { _vertexBuffer };
+            VkBuffer vertexBuffers[] = { vertexBuffer.buffer };
             VkDeviceSize offsets[] = { 0 };
 
             vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
 
             // note that the current sample model has index count > 65535 so we use uint32_t
             //vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-            vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(_commandBuffers[i], indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            // descriptor sets are not unqiue to graphics pipeline.  Therefore we need to specify we are binding to graphics (as opposed to compute)
+            // descriptor sets are not uniqiue to graphics pipeline.  Therefore we need to specify we are binding to graphics (as opposed to compute)
             vkCmdBindDescriptorSets(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[i], 0, nullptr);
 
             vkCmdDrawIndexed(_commandBuffers[i], static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
@@ -1166,9 +1104,9 @@ private:
         // copy the MVP into the corresponding uniform buffer
         // TODO: look into using push constants for a more efficent means of passing the uniform data to shaders
         void* data = nullptr;
-        vkMapMemory(_device, _uniformBuffersMemory[bufferIndex], 0, sizeof(ubo), 0, &data);
+        vkMapMemory(_device, uniformBuffers[bufferIndex].memory, 0, sizeof(ubo), 0, &data);
         memcpy(data, &ubo, sizeof(ubo));
-        vkUnmapMemory(_device, _uniformBuffersMemory[bufferIndex]);
+        vkUnmapMemory(_device, uniformBuffers[bufferIndex].memory);
     }
 
     void drawFrame() {
@@ -1299,7 +1237,7 @@ private:
         VkMemoryAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         allocInfo.allocationSize = memoryRequirements.size;
-        allocInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, memoryPropertyFlags);
+        allocInfo.memoryTypeIndex = vkdev::Buffer::findMemoryType(_physicalDevice, memoryRequirements.memoryTypeBits, memoryPropertyFlags);
 
         if (vkAllocateMemory(_device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
             throw std::runtime_error("failed to allocate image memory");
@@ -1401,15 +1339,14 @@ private:
 
         // we follow the convention of creating the staging buffer, mapping memory then transferring to destination buffer
         VkDeviceSize imageSize = width * height * 4;
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
+        vkdev::Buffer stagingBuffer;
 
-        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+        stagingBuffer.create(_physicalDevice, _device, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
         void* data = nullptr;
-        vkMapMemory(_device, stagingBufferMemory, 0, imageSize, 0, &data);
+        vkMapMemory(_device, stagingBuffer.memory, 0, imageSize, 0, &data);
         memcpy(data, pixels, static_cast<size_t>(imageSize));
-        vkUnmapMemory(_device, stagingBufferMemory);
+        vkUnmapMemory(_device, stagingBuffer.memory);
 
         stbi_image_free(pixels);
 
@@ -1421,7 +1358,7 @@ private:
         // note: image was created with undefined layout in createImage function above
         // we will transition the image into a state where it can have the data loaded into it.
         transitionImageLayout(_textureImage, imageFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, _mipLevels);
-        copyBufferToImage(stagingBuffer, _textureImage, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+        copyBufferToImage(stagingBuffer.buffer, _textureImage, static_cast<uint32_t>(width), static_cast<uint32_t>(height));
 
         if (_mipLevels > 1) {
             // note that this function will transition all mipmap levels to optimal read format
@@ -1433,8 +1370,7 @@ private:
             transitionImageLayout(_textureImage, imageFormat, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, _mipLevels);
         }
 
-        vkDestroyBuffer(_device, stagingBuffer, nullptr);
-        vkFreeMemory(_device, stagingBufferMemory, nullptr);
+        stagingBuffer.cleanup();
     }
 
     // This function will take an image that has had data loaded into mip level 0 and generate mipmaps for it
@@ -1699,9 +1635,8 @@ private:
 
         swapchain->cleanup();
 
-        for (size_t i = 0; i < _uniformBuffers.size(); i++) {
-            vkDestroyBuffer(_device, _uniformBuffers[i], nullptr);
-            vkFreeMemory(_device, _uniformBuffersMemory[i], nullptr);
+        for (size_t i = 0; i < uniformBuffers.size(); i++) {
+            uniformBuffers[i].cleanup();
         }
 
         vkDestroyDescriptorPool(_device, _descriptorPool, nullptr);
@@ -1717,11 +1652,8 @@ private:
 
         vkDestroyDescriptorSetLayout(_device, _descriptorSetLayout, nullptr);
 
-        vkDestroyBuffer(_device, _indexBuffer, nullptr);
-        vkFreeMemory(_device, _indexBufferMemory, nullptr);
-
-        vkDestroyBuffer(_device, _vertexBuffer, nullptr);
-        vkFreeMemory(_device, _vertexBufferMemory, nullptr);
+        indexBuffer.cleanup();
+        vertexBuffer.cleanup();
 
         for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
             vkDestroySemaphore(_device, _renderFinishedSemaphores[i], nullptr);
@@ -1781,13 +1713,10 @@ private:
     std::vector<VkFence> _inFLightImages;
     size_t currentFrameIndex = 0;
 
-    VkBuffer _vertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory _vertexBufferMemory = VK_NULL_HANDLE;
-    VkBuffer _indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory _indexBufferMemory = VK_NULL_HANDLE;
+    vkdev::Buffer vertexBuffer;
+    vkdev::Buffer indexBuffer;
 
-    std::vector<VkBuffer> _uniformBuffers;
-    std::vector<VkDeviceMemory> _uniformBuffersMemory;
+    std::vector<vkdev::Buffer> uniformBuffers;
 
     VkDescriptorPool _descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> _descriptorSets;

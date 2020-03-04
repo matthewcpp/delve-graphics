@@ -4,17 +4,16 @@
 
 #include <cstdint>
 #include <optional>
+#include <limits>
 
-namespace vkdev::queue {
+namespace vkdev {
 
-struct FamilyIndices {
-    std::optional<uint32_t> graphicsFamily;
-    std::optional<uint32_t> presentationFamily; // allows for displaying to a surface
+struct Queue {
+    VkQueue handle = VK_NULL_HANDLE;
+    uint32_t index = std::numeric_limits<uint32_t>::max();
 
-    inline bool isComplete() const { return graphicsFamily.has_value() && presentationFamily.has_value(); }
+    static uint32_t findGraphicsQueueIndex(VkPhysicalDevice physicalDevice);
+    static uint32_t findPresentationQueueIndex(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
 };
-
-// todo break this up into multiple functions?
-FamilyIndices findFamilies(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
 
 }

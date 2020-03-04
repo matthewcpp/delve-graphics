@@ -6,12 +6,11 @@
 namespace vkdev {
 
 void CommandPool::create() {
-    auto queueFamilyIndicies = queue::findFamilies(physicalDevice, surface);
 
     // command pool can only create commands on a particular type of queue.  In or case we are making graphics commands so needs to be associated with our graphics queue
     VkCommandPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = queueFamilyIndicies.graphicsFamily.value();
+    poolInfo.queueFamilyIndex = queue.index;
     poolInfo.flags = 0;
 
     if (vkCreateCommandPool(device, &poolInfo, nullptr, &handle) != VK_SUCCESS) {
@@ -24,14 +23,14 @@ void CommandPool::cleanup(){
 }
 
 SingleUseCommandBuffer CommandPool::createSingleUseBuffer(){
-    return SingleUseCommandBuffer(handle, device);
+    return SingleUseCommandBuffer(*this, device);
 }
 
 void SingleUseCommandBuffer::start() {
     VkCommandBufferAllocateInfo commandBufferAllocInfo = {};
     commandBufferAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     commandBufferAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    commandBufferAllocInfo.commandPool = pool;
+    commandBufferAllocInfo.commandPool = pool.handle;
     commandBufferAllocInfo.commandBufferCount = 1;
 
     vkAllocateCommandBuffers(device, &commandBufferAllocInfo, &handle);
@@ -43,7 +42,7 @@ void SingleUseCommandBuffer::start() {
     vkBeginCommandBuffer(handle, &beginInfo);
 }
 
-void SingleUseCommandBuffer::submit(VkQueue queue) {
+void SingleUseCommandBuffer::submit() {
     vkEndCommandBuffer(handle);
 
     VkSubmitInfo submitInfo = {};
@@ -51,10 +50,10 @@ void SingleUseCommandBuffer::submit(VkQueue queue) {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &handle;
 
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    vkQueueSubmit(pool.queue.handle, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(pool.queue.handle);
 
-    vkFreeCommandBuffers(device, pool, 1, &handle);
+    vkFreeCommandBuffers(device, pool.handle, 1, &handle);
 }
 
 }

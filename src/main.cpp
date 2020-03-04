@@ -190,46 +190,6 @@ private:
         }
     }
 
-    struct QueueFamilyIndices {
-        std::optional<uint32_t> graphicsFamily;
-        std::optional<uint32_t> presentationFamily; // allows for displaying to a surface
-
-        inline bool isComplete() const { return graphicsFamily.has_value() && presentationFamily.has_value(); }
-    };
-
-    QueueFamilyIndices findQueueFamilies(VkPhysicalDevice physicalDevice) {
-        QueueFamilyIndices indices;
-
-        uint32_t queueFamilyCount = 0;
-        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
-
-        std::vector<VkQueueFamilyProperties> queueFamilyProperties(queueFamilyCount);
-        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilyProperties.data());
-
-        for (uint32_t i = 0; i < queueFamilyProperties.size(); i++) {
-            if (queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-                indices.graphicsFamily = i;
-
-                if (indices.isComplete()) {
-                    break;
-                }
-            }
-
-            VkBool32 presentationSupport = VK_FALSE;
-            vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, i, _surface, &presentationSupport);
-
-            if (presentationSupport) {
-                indices.presentationFamily = i;
-
-                if (indices.isComplete()) {
-                    break;
-                }
-            }
-        }
-
-        return indices;
-    }
-
     struct SwapChainSupportInfo {
         VkSurfaceCapabilitiesKHR surfaceCapabilities;
         std::vector<VkSurfaceFormatKHR> formats;
@@ -278,7 +238,14 @@ private:
     }
 
     bool phsicalDeviceIsSuitable(VkPhysicalDevice physicalDevice) {
-        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
+        // ensure that this physical device has both graphics and presentation queues.
+        try {
+            vkdev::Queue::findGraphicsQueueIndex(physicalDevice);
+            vkdev::Queue::findPresentationQueueIndex(physicalDevice, _surface);
+        }
+        catch (std::runtime_error e) {
+            return false;
+        }
 
         bool requiredExtensionsSupported = deviceSupportsRequiredExtensions(physicalDevice);
 
@@ -290,7 +257,7 @@ private:
             VkPhysicalDeviceFeatures supportedFeatures;
             vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
 
-            return queueFamilyIndices.isComplete() && swapChainAdequate && supportedFeatures.samplerAnisotropy;
+            return swapChainAdequate && supportedFeatures.samplerAnisotropy;
         }
         else {
             return false;
@@ -367,11 +334,12 @@ private:
     }
 
     void createLogicalDevice() {
-        QueueFamilyIndices queueFamilyIndices = findQueueFamilies(_physicalDevice);
+        graphicsQueue.index = vkdev::Queue::findGraphicsQueueIndex(_physicalDevice);
+        presentationQueue.index = vkdev::Queue::findPresentationQueueIndex(_physicalDevice, _surface);
 
-        // will need to create a device queue for each unique family.  It is possible that the diffent queue types will be part of the same family.
+        // will need to create a device queue for each unique family.  It is possible that the different queue types will be part of the same family.
         std::vector<VkDeviceQueueCreateInfo> deviceQueueInfos;
-        std::set<uint32_t> uniqueQueueFamilies = { queueFamilyIndices.graphicsFamily.value(), queueFamilyIndices.presentationFamily.value() };
+        std::set<uint32_t> uniqueQueueFamilies = { graphicsQueue.index, presentationQueue.index };
 
         float queuePriority = 1.0f;
         for (const auto& queueFamily : uniqueQueueFamilies) {
@@ -407,8 +375,8 @@ private:
         }
 
         // after device creation is successful, need to grab a handle to our queues
-        vkGetDeviceQueue(_device, queueFamilyIndices.graphicsFamily.value(), 0, &_graphicsQueue);
-        vkGetDeviceQueue(_device, queueFamilyIndices.presentationFamily.value(), 0, &_presentationQueue);
+        vkGetDeviceQueue(_device, graphicsQueue.index, 0, &graphicsQueue.handle);
+        vkGetDeviceQueue(_device, presentationQueue.index, 0, &presentationQueue.handle);
     }
 
     void createSurface() {
@@ -613,7 +581,7 @@ private:
         regionToCopy.size = size;
         vkCmdCopyBuffer(commandBuffer.handle, srcBuffer, dstBuffer, 1, &regionToCopy);
 
-        commandBuffer.submit(_graphicsQueue);
+        commandBuffer.submit();
     }
 
     void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
@@ -665,7 +633,7 @@ private:
 
         vkCmdCopyBufferToImage(commandBuffer.handle, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-        commandBuffer.submit(_graphicsQueue);
+        commandBuffer.submit();
     }
 
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels) {
@@ -737,7 +705,7 @@ private:
             0, nullptr,
             0, nullptr, 1, &barrier);
 
-        commandBuffer.submit(_graphicsQueue);
+        commandBuffer.submit();
     }
 
     void createVertexBuffer() {
@@ -1086,9 +1054,7 @@ private:
     }
 
     void createCommandPool() {
-        auto queueFamilyIndicies = findQueueFamilies(_physicalDevice);
-
-        commandPool = std::make_unique<vkdev::CommandPool>(_physicalDevice, _device, _surface);
+        commandPool = std::make_unique<vkdev::CommandPool>(_physicalDevice, _device, graphicsQueue);
         commandPool->create();
     }
 
@@ -1252,7 +1218,7 @@ private:
 
         vkResetFences(_device, 1, &_inFlightFences[currentFrameIndex]);
 
-        if (vkQueueSubmit(_graphicsQueue, 1, &submitInfo, _inFlightFences[currentFrameIndex]) != VK_SUCCESS) {
+        if (vkQueueSubmit(graphicsQueue.handle, 1, &submitInfo, _inFlightFences[currentFrameIndex]) != VK_SUCCESS) {
             throw std::runtime_error("error submitting draw command");
         }
 
@@ -1271,7 +1237,7 @@ private:
 
         // returns same error codes as acquiring an image above.
         // in this case we will recreate the swap chain
-        result = vkQueuePresentKHR(_presentationQueue, &presentInfo);
+        result = vkQueuePresentKHR(presentationQueue.handle, &presentInfo);
         if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || _glfwFramebufferResized) {
             _glfwFramebufferResized = false;
             recreateSwapChain();
@@ -1564,7 +1530,7 @@ private:
             0, nullptr,
             1, &barrier);
 
-        commandBuffer.submit(_graphicsQueue);
+        commandBuffer.submit();
     }
 
     void createTextureImageView() {
@@ -1793,8 +1759,8 @@ private:
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
     VkDevice _device = VK_NULL_HANDLE;
-    VkQueue _graphicsQueue = VK_NULL_HANDLE;
-    VkQueue _presentationQueue = VK_NULL_HANDLE;
+    vkdev::Queue graphicsQueue;
+    vkdev::Queue presentationQueue;
     VkDebugUtilsMessengerEXT _debugMessenger = VK_NULL_HANDLE;
     VkSurfaceKHR _surface;
 

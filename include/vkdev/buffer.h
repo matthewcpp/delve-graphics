@@ -17,6 +17,7 @@ namespace vkdev {
         void cleanup();
 
         void create(VkPhysicalDevice physicalDevice_, VkDevice device_, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
+        void createWithData(VkPhysicalDevice physicalDevice_, VkDevice device_, void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties);
 
         static void copy(CommandPool& commandPool, const Buffer& src, Buffer& dst, VkDeviceSize srcOffset = 0, VkDeviceSize dstOffset = 0, VkDeviceSize size = std::numeric_limits<VkDeviceSize>::max());
         static uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties);

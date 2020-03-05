@@ -172,7 +172,7 @@ namespace vkdev {
 
         imageViews.resize(images.size());
         for (size_t i = 0; i < imageViews.size(); i++) {
-            imageViews[i] = image::createView(device, images[i], imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            imageViews[i] = vkdev::Image::createView(device, images[i], imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
         }
     }
 

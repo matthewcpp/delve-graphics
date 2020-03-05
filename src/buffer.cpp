@@ -53,6 +53,15 @@ namespace vkdev {
         size = bufferSize;
     }
 
+    void Buffer::createWithData(VkPhysicalDevice physicalDevice_, VkDevice device_, void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
+        create(physicalDevice_, device_, size, usage, properties);
+
+        void* mappedData = nullptr;
+        vkMapMemory(device, memory, 0, size, 0, &mappedData);
+        memcpy(mappedData, data, static_cast<size_t>(size));
+        vkUnmapMemory(device, memory);
+    }
+
     // copying a vertex buffer requires a transfer command.  We will need to create a temporary command buffer to execute the command
     // Ideally it would be useful to create a separate command pool for short lived transfer operations like this as opposed to using the main command pool.
     // note that we are using the graphics queue to perform copies.  this is because graphics queues must also support buffer copy operations.

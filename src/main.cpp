@@ -2,6 +2,7 @@
 #include "vkdev/command.h"
 #include "vkdev/queue.h"
 #include "vkdev/buffer.h"
+#include "vkdev/instance.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -131,67 +132,6 @@ struct UniformBufferObject {
 
 class VulkanTestApplication {
 private:
-
-    static void initMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo) {
-        createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-        createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-        createInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-        createInfo.pfnUserCallback = debugCallback;
-        createInfo.pUserData = nullptr; // Optional
-    }
-
-    void createInstance() {
-        // ApplicationInfo is optional but can allow for the driver to perhaps perform optimizations
-        VkApplicationInfo appInfo = {};
-
-        appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = "Hello Triangle";
-        appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.pEngineName = "No Engine";
-        appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
-
-        VkInstanceCreateInfo createInfo = {};
-        createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-        createInfo.pApplicationInfo = &appInfo;
-
-        // Retrieve the needed Vulkan extensions for working with a GLFW window
-        uint32_t glfwExtensionCount = 0;
-        const char** glfwVulkanExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-        std::vector<const char*> requiredExtensions(glfwVulkanExtensions, glfwVulkanExtensions + glfwExtensionCount);
-
-        // if logging is enabled we will create a special debug messenger to handle any message emitted during instance creation
-        // Note this messenger will be cleaned up by the system.
-        VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
-        auto supportedValidationLayers = getSupportedValidationLayers();
-        if (_enableValidation) {
-            if (supportedValidationLayers.empty()) {
-                throw std::runtime_error("No supported validation layers found");
-            }
-
-            createInfo.enabledLayerCount = static_cast<uint32_t>(supportedValidationLayers.size());
-            createInfo.ppEnabledLayerNames = supportedValidationLayers.data();
-
-            // Add on the debug utilities extension
-            requiredExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-
-            initMessengerCreateInfo(debugCreateInfo);
-            createInfo.pNext = &debugCreateInfo;
-        }
-        else {
-            createInfo.enabledLayerCount = 0;
-            createInfo.pNext = nullptr;
-        }
-
-        createInfo.enabledExtensionCount = static_cast<uint32_t>(requiredExtensions.size());
-        createInfo.ppEnabledExtensionNames = requiredExtensions.data();
-
-        if (vkCreateInstance(&createInfo, nullptr, &_instance) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create vulkan instance");
-        }
-    }
-
     struct SwapChainSupportInfo {
         VkSurfaceCapabilitiesKHR surfaceCapabilities;
         std::vector<VkSurfaceFormatKHR> formats;
@@ -311,14 +251,14 @@ private:
     // By default we will query the available devices and pick the first suitable device
     void pickPhysicalDevice() {
         uint32_t deviceCount = 0;
-        vkEnumeratePhysicalDevices(_instance, &deviceCount, nullptr);
+        vkEnumeratePhysicalDevices(instance.handle, &deviceCount, nullptr);
 
         if (deviceCount == 0) {
             throw std::runtime_error("failed to find a graphics card that supports vulkan");
         }
 
         std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-        vkEnumeratePhysicalDevices(_instance, &deviceCount, physicalDevices.data());
+        vkEnumeratePhysicalDevices(instance.handle, &deviceCount, physicalDevices.data());
 
         for (auto device : physicalDevices) {
             if (phsicalDeviceIsSuitable(device)) {
@@ -382,38 +322,8 @@ private:
     }
 
     void createSurface() {
-        if (glfwCreateWindowSurface(_instance, _glfwWindow, nullptr, &_surface) != VK_SUCCESS) {
+        if (glfwCreateWindowSurface(instance.handle, _glfwWindow, nullptr, &_surface) != VK_SUCCESS) {
             throw std::runtime_error("failure creating window surface");
-        }
-    }
-
-    void enableLogging() {
-        if (!_enableValidation) return;
-
-        VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
-        initMessengerCreateInfo(createInfo);
-
-        auto createDebugMessengerFunc = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(_instance, "vkCreateDebugUtilsMessengerEXT");
-
-        if (!createDebugMessengerFunc) {
-            throw std::runtime_error("unable to load vkCreateDebugUtilsMessengerEXT function");
-        }
-
-        if (createDebugMessengerFunc(_instance, &createInfo, nullptr, &_debugMessenger) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create debug messenger");
-        }
-    }
-
-    void terminateLogging() {
-        if (!_enableValidation) return;
-
-        auto destroyMessengerFunc = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(_instance, "vkDestroyDebugUtilsMessengerEXT");
-
-        if (destroyMessengerFunc) {
-            destroyMessengerFunc(_instance, _debugMessenger, nullptr);
-        }
-        else {
-            std::cout << "warning: unable to destroy debug logger." << std::endl;
         }
     }
 
@@ -1554,8 +1464,8 @@ private:
     }
 
     void initVulkan() {
-        createInstance();
-        enableLogging();
+        instance.create(_enableValidation);
+
         createSurface();
         pickPhysicalDevice();
         createLogicalDevice();
@@ -1664,9 +1574,8 @@ private:
         commandPool->cleanup();
 
         vkDestroyDevice(_device, nullptr);
-        terminateLogging();
-        vkDestroySurfaceKHR(_instance, _surface, nullptr);
-        vkDestroyInstance(_instance, nullptr);
+        vkDestroySurfaceKHR(instance.handle, _surface, nullptr);
+        instance.cleanup();
 
         if (_glfwWindow) {
             glfwDestroyWindow(_glfwWindow);
@@ -1688,7 +1597,7 @@ public:
 private:
     GLFWwindow* _glfwWindow = nullptr;
 
-    VkInstance _instance = VK_NULL_HANDLE;
+    vkdev::Instance instance;
     VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
     VkDevice _device = VK_NULL_HANDLE;
     vkdev::Queue graphicsQueue;

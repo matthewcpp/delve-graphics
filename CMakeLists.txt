@@ -25,6 +25,7 @@ add_executable(vulkantest
     include/vkdev/buffer.h src/buffer.cpp
     include/vkdev/command.h src/command.cpp
     include/vkdev/image.h src/image.cpp
+    include/vkdev/instance.h src/instance.cpp
     include/vkdev/queue.h src/queue.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
 )

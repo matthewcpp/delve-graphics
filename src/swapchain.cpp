@@ -176,11 +176,116 @@ namespace vkdev {
         }
     }
 
-    void SwapChain::cleanup() {
+    void SwapChain::cleanupImages() {
         for (auto imageView : imageViews) {
             vkDestroyImageView(device, imageView, nullptr);
         }
 
         vkDestroySwapchainKHR(device, handle, nullptr); // this destroys the images in the chain
+    }
+
+    void SwapChain::cleanupSyncObjects() {
+        for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+            vkDestroyFence(device, inFlightFences[i], nullptr);
+        }
+    }
+
+    void SwapChain::createSyncObjects() {
+        imageAvailableSemaphores.resize(MAX_SIMULTANEOUS_FRAMES);
+        renderFinishedSemaphores.resize(MAX_SIMULTANEOUS_FRAMES);
+        inFlightFences.resize(MAX_SIMULTANEOUS_FRAMES);
+        inFlightImages.resize(images.size(), VK_NULL_HANDLE);
+
+        VkSemaphoreCreateInfo semaphoreInfo = {};
+        semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkFenceCreateInfo fenceInfo = {};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
+            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(device, &semaphoreInfo, NULL, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+                vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+                    throw std::runtime_error("failed to create semaphores");
+            }
+        }
+    }
+
+    VkResult SwapChain::aquireFrame(uint32_t& index) {
+        vkWaitForFences(device, 1, &inFlightFences[currentFrameIndex], VK_TRUE, std::numeric_limits<uint64_t>::max());
+
+        // get the next available image from the swap chain and signal the semaphore when its available
+        // if there is an error we may need to recreate the swap chain.  I.E. Window is resized, etc.
+        // we do not recreate swap chain in suboptimal state here because we have already acquired an image.  suboptimal return code is still considered a successful return value
+        uint32_t imageIndex = 0;
+        VkResult result = vkAcquireNextImageKHR(device, handle, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
+
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR && result != VK_ERROR_OUT_OF_DATE_KHR) {
+            throw std::runtime_error("failed to acquire swap chain image");
+        }
+
+        index = imageIndex;
+        return result;
+    }
+
+    VkResult SwapChain::drawFrame(uint32_t imageIndex, VkCommandBuffer commandBuffer) {
+        // Check if a previous frame is using this image (i.e. there is its fence to wait on)
+        if (inFlightImages[imageIndex] != VK_NULL_HANDLE) {
+            vkWaitForFences(device, 1, &inFlightImages[imageIndex], VK_TRUE, UINT64_MAX);
+        }
+        // Mark the image as now being in use by this frame
+        inFlightImages[imageIndex] = inFlightFences[currentFrameIndex];
+
+        VkSubmitInfo submitInfo = {};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+        // signals that the system needs to wait for _imageAvailableSemaphore to be signaled before the color attachment stage can begin
+        VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrameIndex] };
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        submitInfo.waitSemaphoreCount = 1;
+        submitInfo.pWaitSemaphores = waitSemaphores;
+        submitInfo.pWaitDstStageMask = waitStages;
+
+        // set the correct command buffer based on the swap chain image index.
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &commandBuffer;
+
+        // set up the semaphore to be signaled when command is done
+        VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrameIndex] };
+        submitInfo.signalSemaphoreCount = 1;
+        submitInfo.pSignalSemaphores = signalSemaphores;
+
+        vkResetFences(device, 1, &inFlightFences[currentFrameIndex]);
+
+        if (vkQueueSubmit(graphicsQueue->handle, 1, &submitInfo, inFlightFences[currentFrameIndex]) != VK_SUCCESS) {
+            throw std::runtime_error("error submitting draw command");
+        }
+
+        // need to signal to swap chain that image is ready for presentation
+        // it will wait for the render finished semaphore to be signaled before doing its thing
+        VkPresentInfoKHR presentInfo = {};
+        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        presentInfo.waitSemaphoreCount = 1;
+        presentInfo.pWaitSemaphores = signalSemaphores;
+
+        VkSwapchainKHR swapchains[] = { handle };
+        presentInfo.swapchainCount = 1;
+        presentInfo.pSwapchains = swapchains;
+        presentInfo.pImageIndices = &imageIndex;
+        presentInfo.pResults = nullptr; // Optional
+
+        // returns same error codes as acquiring an image above.
+        // in this case we will recreate the swap chain
+        VkResult result = vkQueuePresentKHR(presentationQueue->handle, &presentInfo);
+        if (result != VK_SUCCESS && result != VK_ERROR_OUT_OF_DATE_KHR && result != VK_SUBOPTIMAL_KHR) {
+            throw std::runtime_error("failed to present swap chain image");
+        }
+
+        currentFrameIndex = (currentFrameIndex + 1) % vkdev::SwapChain::MAX_SIMULTANEOUS_FRAMES;
+
+        return result;
     }
 }

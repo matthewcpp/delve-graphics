@@ -1,7 +1,6 @@
 #include "vkdev/swapchain.h"
 #include "vkdev/command.h"
 #include "vkdev/device.h"
-#include "vkdev/queue.h"
 #include "vkdev/buffer.h"
 #include "vkdev/instance.h"
 #include "vkdev/image.h"
@@ -271,32 +270,34 @@ private:
     }
 
     void createVertexBuffer() {
+        vertexBuffer = std::make_unique<vkdev::Buffer>(*device);
         // create a temporary CPU visible staging buffer to copy vertex data to the GPU (device local)
         const auto bufferSize = static_cast<VkDeviceSize>(sizeof(Vertex) * _vertices.size());
 
-        vkdev::Buffer stagingBuffer;
+        vkdev::Buffer stagingBuffer{*device};
         stagingBuffer.createWithData(device->physical, device->logical, _vertices.data(), bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
         // create our vertex buffer which will hold data on the GPU
-        vertexBuffer.create(device->physical, device->logical, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vertexBuffer->create(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         // copy the staging buffer to device local buffer
-        vkdev::Buffer::copy(*commandPool, stagingBuffer, vertexBuffer);
+        vkdev::Buffer::copy(*commandPool, stagingBuffer, *vertexBuffer);
 
         // cleanup staging buffer
         stagingBuffer.cleanup();
     }
 
     void createIndexBuffer() {
+        indexBuffer = std::make_unique<vkdev::Buffer>(*device);
         // note current model is using uint32_t for indices
         //const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint16_t) * indices.size());
         const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint32_t) * _indices.size());
 
-        vkdev::Buffer stagingBuffer;
+        vkdev::Buffer stagingBuffer{*device};
         stagingBuffer.createWithData(device->physical, device->logical, _indices.data(), bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-        indexBuffer.create(device->physical, device->logical, bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        vkdev::Buffer::copy(*commandPool, stagingBuffer, indexBuffer);
+        indexBuffer->create(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vkdev::Buffer::copy(*commandPool, stagingBuffer, *indexBuffer);
 
         stagingBuffer.cleanup();
     }
@@ -306,10 +307,11 @@ private:
     void createUniformBuffers() {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-        uniformBuffers.resize(swapchain->images.size());
+        uniformBuffers.reserve(swapchain->images.size());
 
-        for (size_t i = 0; i < uniformBuffers.size(); i++) {
-            uniformBuffers[i].create(device->physical, device->logical, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        for (size_t i = 0; i < swapchain->images.size(); i++) {
+            auto& uniformBuffer = uniformBuffers.emplace_back(*device);
+            uniformBuffer.create(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         }
     }
 
@@ -357,7 +359,7 @@ private:
 
             VkDescriptorImageInfo imageInfo = {};
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = textureImage.view;
+            imageInfo.imageView = textureImage->view;
             imageInfo.sampler = _textureSampler;
 
             // the array will contain the write info for each of the descriptors
@@ -584,7 +586,7 @@ private:
 
         for (size_t i = 0; i < swapchain->imageViews.size(); i++) {
             // The color attachment differs for every swap chain image, but the same depth image can be used by all of them because only a single subpass is running at the same time due to our semaphores
-            std::array<VkImageView, 3> attachments = { msaaColorImage.view, depthImage.view, swapchain->imageViews[i] };
+            std::array<VkImageView, 3> attachments = { msaaColorImage->view, depthImage->view, swapchain->imageViews[i] };
 
             VkFramebufferCreateInfo framebufferInfo = {};
             framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -602,7 +604,7 @@ private:
     }
 
     void createCommandPool() {
-        commandPool = std::make_unique<vkdev::CommandPool>(device->physical, device->logical, device->graphicsQueue);
+        commandPool = std::make_unique<vkdev::CommandPool>(*device, device->graphicsQueue);
         commandPool->create();
     }
 
@@ -650,14 +652,14 @@ private:
             vkCmdBeginRenderPass(_commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
 
-            VkBuffer vertexBuffers[] = { vertexBuffer.buffer };
+            VkBuffer vertexBuffers[] = { vertexBuffer->buffer };
             VkDeviceSize offsets[] = { 0 };
 
             vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
 
             // note that the current sample model has index count > 65535 so we use uint32_t
             //vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-            vkCmdBindIndexBuffer(_commandBuffers[i], indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(_commandBuffers[i], indexBuffer->buffer, 0, VK_INDEX_TYPE_UINT32);
 
             // descriptor sets are not uniqiue to graphics pipeline.  Therefore we need to specify we are binding to graphics (as opposed to compute)
             vkCmdBindDescriptorSets(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[i], 0, nullptr);
@@ -751,12 +753,12 @@ private:
     }
 
     void createDepthResources() {
+        depthImage = std::make_unique<vkdev::Image>(*device);
         const VkFormat depthFormat = findDepthBufferFormat();
 
-        depthImage.init(device->physical, device->logical);
-        depthImage.create(swapchain->extent.width, swapchain->extent.height, 1, _msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        depthImage.createView(VK_IMAGE_ASPECT_DEPTH_BIT);
-        depthImage.transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);  // note this is optional in this case
+        depthImage->create(swapchain->extent.width, swapchain->extent.height, 1, _msaaSamples, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        depthImage->createView(VK_IMAGE_ASPECT_DEPTH_BIT);
+        depthImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);  // note this is optional in this case
     }
 
     void loadModel() {
@@ -801,6 +803,8 @@ private:
     }
 
     void createTextureImage() {
+        textureImage = std::make_unique<vkdev::Image>(*device);
+
         int width, height, numChannels;
         stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &width, &height, &numChannels, STBI_rgb_alpha);
         _mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
@@ -811,7 +815,7 @@ private:
 
         // we follow the convention of creating the staging buffer, mapping memory then transferring to destination buffer
         VkDeviceSize imageSize = width * height * 4;
-        vkdev::Buffer stagingBuffer;
+        vkdev::Buffer stagingBuffer{*device};
 
         stagingBuffer.createWithData(device->physical, device->logical, pixels, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
@@ -821,23 +825,22 @@ private:
         const VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         const VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-        textureImage.init(device->physical, device->logical);
-        textureImage.create(static_cast<uint32_t>(width), static_cast<uint32_t>(height), _mipLevels, VK_SAMPLE_COUNT_1_BIT, imageFormat, VK_IMAGE_TILING_OPTIMAL, usageFlags, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        textureImage->create(static_cast<uint32_t>(width), static_cast<uint32_t>(height), _mipLevels, VK_SAMPLE_COUNT_1_BIT, imageFormat, VK_IMAGE_TILING_OPTIMAL, usageFlags, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         // note: image was created with undefined layout in createImage function above we will transition the image into a state where it can have the data loaded into it.
-        textureImage.transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        textureImage.loadBufferData(*commandPool, stagingBuffer);
+        textureImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        textureImage->loadBufferData(*commandPool, stagingBuffer);
 
         if (_mipLevels > 1) {
             // note that this function will transition all mipmap levels to optimal read format.  in lieu of this function, mipmap levels could be loaded in manually
-            textureImage.generateMipmaps(*commandPool);
+            textureImage->generateMipmaps(*commandPool);
         }
         else {
             // now that the data is copied into the image, transition it to optimal read format
-            textureImage.transitionLayout(*commandPool, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            textureImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 
-        textureImage.createView(VK_IMAGE_ASPECT_COLOR_BIT);
+        textureImage->createView(VK_IMAGE_ASPECT_COLOR_BIT);
         
         stagingBuffer.cleanup();
     }
@@ -879,11 +882,12 @@ private:
     // create the multisampled color image buffer.  Note that multisampled images should not have multiple mip levels (enforced by the spec)
     // We are only ever rendering one image at a time, so only one multisampled image is needed
     void createMsaaColorResources() {
+        msaaColorImage = std::make_unique<vkdev::Image>(*device);
+
         const VkFormat imageFormat = swapchain->imageFormat;
 
-        msaaColorImage.init(device->physical, device->logical);
-        msaaColorImage.create(swapchain->extent.width, swapchain->extent.height, 1, _msaaSamples, imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        msaaColorImage.createView(VK_IMAGE_ASPECT_COLOR_BIT);
+        msaaColorImage->create(swapchain->extent.width, swapchain->extent.height, 1, _msaaSamples, imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        msaaColorImage->createView(VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     void initVulkan() {
@@ -895,7 +899,7 @@ private:
 
         _msaaSamples = std::min(_msaaSamples, device->getMaxSupportedSampleCount());
 
-        swapchain = std::make_unique<vkdev::SwapChain>(device->physical, device->logical, _surface, &device->graphicsQueue, &device->presentationQueue);
+        swapchain = std::make_unique<vkdev::SwapChain>(*device, _surface);
         initializeSwapChain();
 
         createRenderPass();
@@ -972,9 +976,9 @@ private:
     }
 
     void cleanupSwapChain() {
-        msaaColorImage.cleanup();
+        msaaColorImage->cleanup();
 
-        depthImage.cleanup();
+        depthImage->cleanup();
 
         for (auto framebuffer : _swapChainFramebuffers) {
             vkDestroyFramebuffer(device->logical, framebuffer, nullptr);
@@ -991,6 +995,7 @@ private:
         for (size_t i = 0; i < uniformBuffers.size(); i++) {
             uniformBuffers[i].cleanup();
         }
+        uniformBuffers.clear();
 
         vkDestroyDescriptorPool(device->logical, _descriptorPool, nullptr);
     }
@@ -999,12 +1004,12 @@ private:
         cleanupSwapChain();
 
         vkDestroySampler(device->logical, _textureSampler, nullptr);
-        textureImage.cleanup();
+        textureImage->cleanup();
 
         vkDestroyDescriptorSetLayout(device->logical, _descriptorSetLayout, nullptr);
 
-        indexBuffer.cleanup();
-        vertexBuffer.cleanup();
+        indexBuffer->cleanup();
+        vertexBuffer->cleanup();
 
         swapchain->cleanupSyncObjects();
 
@@ -1050,8 +1055,8 @@ private:
     std::unique_ptr<vkdev::CommandPool> commandPool;
     std::vector<VkCommandBuffer> _commandBuffers;
 
-    vkdev::Buffer vertexBuffer;
-    vkdev::Buffer indexBuffer;
+    std::unique_ptr<vkdev::Buffer> vertexBuffer;
+    std::unique_ptr<vkdev::Buffer> indexBuffer;
 
     std::vector<vkdev::Buffer> uniformBuffers;
 
@@ -1059,13 +1064,13 @@ private:
     std::vector<VkDescriptorSet> _descriptorSets;
 
     uint32_t _mipLevels = 1;
-    vkdev::Image textureImage;
+    std::unique_ptr<vkdev::Image> textureImage;
     VkSampler _textureSampler = VK_NULL_HANDLE;
 
-    vkdev::Image depthImage;
+    std::unique_ptr<vkdev::Image> depthImage;
 
     VkSampleCountFlagBits _msaaSamples = VK_SAMPLE_COUNT_4_BIT;
-    vkdev::Image msaaColorImage;
+    std::unique_ptr<vkdev::Image> msaaColorImage;
 
     bool _glfwFramebufferResized = false;
     bool _enableValidation = false;

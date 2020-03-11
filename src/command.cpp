@@ -13,13 +13,13 @@ void CommandPool::create() {
     poolInfo.queueFamilyIndex = queue.index;
     poolInfo.flags = 0;
 
-    if (vkCreateCommandPool(device, &poolInfo, nullptr, &handle) != VK_SUCCESS) {
+    if (vkCreateCommandPool(device.logical, &poolInfo, nullptr, &handle) != VK_SUCCESS) {
         throw std::runtime_error("failed to create command pool");
     }
 }
 
 void CommandPool::cleanup(){
-    vkDestroyCommandPool(device, handle, nullptr);
+    vkDestroyCommandPool(device.logical, handle, nullptr);
 }
 
 SingleUseCommandBuffer CommandPool::createSingleUseBuffer(){
@@ -33,7 +33,7 @@ void SingleUseCommandBuffer::start() {
     commandBufferAllocInfo.commandPool = pool.handle;
     commandBufferAllocInfo.commandBufferCount = 1;
 
-    vkAllocateCommandBuffers(device, &commandBufferAllocInfo, &handle);
+    vkAllocateCommandBuffers(device.logical, &commandBufferAllocInfo, &handle);
 
     VkCommandBufferBeginInfo beginInfo = {};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -53,7 +53,7 @@ void SingleUseCommandBuffer::submit() {
     vkQueueSubmit(pool.queue.handle, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(pool.queue.handle);
 
-    vkFreeCommandBuffers(device, pool.handle, 1, &handle);
+    vkFreeCommandBuffers(device.logical, pool.handle, 1, &handle);
 }
 
 }

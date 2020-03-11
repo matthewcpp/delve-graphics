@@ -78,7 +78,7 @@ namespace vkdev {
     }
 
     void SwapChain::create(const glm::ivec2& framebufferSize) {
-        SwapChainSupportInfo info = SwapChainSupportInfo::getForDevice(physicalDevice, surface);
+        SwapChainSupportInfo info = SwapChainSupportInfo::getForDevice(device.physical, surface);
 
         auto surfaceFormat = chooseSwapSurfaceFormat(info.formats);
         auto presentMode = chooseSwapPresentMode(info.presentModes);
@@ -102,7 +102,7 @@ namespace vkdev {
         swapChainInfo.imageArrayLayers = 1;
         swapChainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // signifies we will be rendering into the image
 
-        QueueFamilyIndices indices = findQueueFamilies(physicalDevice, surface);
+        QueueFamilyIndices indices = findQueueFamilies(device.physical, surface);
 
         uint32_t indiciesArray[] = { indices.graphicsFamily.value(), indices.presentationFamily.value() };
 
@@ -128,36 +128,36 @@ namespace vkdev {
 
         swapChainInfo.oldSwapchain = VK_NULL_HANDLE;
 
-        if (vkCreateSwapchainKHR(device, &swapChainInfo, nullptr, &handle) != VK_SUCCESS) {
+        if (vkCreateSwapchainKHR(device.logical, &swapChainInfo, nullptr, &handle) != VK_SUCCESS) {
             throw std::runtime_error("failed to create swap chain");
         }
 
         imageFormat = surfaceFormat.format;
 
         uint32_t swapChainImageCount = 0;
-        vkGetSwapchainImagesKHR(device, handle, &swapChainImageCount, nullptr);
+        vkGetSwapchainImagesKHR(device.logical, handle, &swapChainImageCount, nullptr);
         images.resize(swapChainImageCount);
-        vkGetSwapchainImagesKHR(device, handle, &swapChainImageCount, images.data());
+        vkGetSwapchainImagesKHR(device.logical, handle, &swapChainImageCount, images.data());
 
         imageViews.resize(images.size());
         for (size_t i = 0; i < imageViews.size(); i++) {
-            imageViews[i] = vkdev::Image::createView(device, images[i], imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+            imageViews[i] = vkdev::Image::createView(device.logical, images[i], imageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
         }
     }
 
     void SwapChain::cleanupImages() {
         for (auto imageView : imageViews) {
-            vkDestroyImageView(device, imageView, nullptr);
+            vkDestroyImageView(device.logical, imageView, nullptr);
         }
 
-        vkDestroySwapchainKHR(device, handle, nullptr); // this destroys the images in the chain
+        vkDestroySwapchainKHR(device.logical, handle, nullptr); // this destroys the images in the chain
     }
 
     void SwapChain::cleanupSyncObjects() {
         for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
-            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
-            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-            vkDestroyFence(device, inFlightFences[i], nullptr);
+            vkDestroySemaphore(device.logical, renderFinishedSemaphores[i], nullptr);
+            vkDestroySemaphore(device.logical, imageAvailableSemaphores[i], nullptr);
+            vkDestroyFence(device.logical, inFlightFences[i], nullptr);
         }
     }
 
@@ -175,22 +175,22 @@ namespace vkdev {
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
         for (int i = 0; i < MAX_SIMULTANEOUS_FRAMES; i++) {
-            if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
-                vkCreateSemaphore(device, &semaphoreInfo, NULL, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
-                vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+            if (vkCreateSemaphore(device.logical, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(device.logical, &semaphoreInfo, NULL, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+                vkCreateFence(device.logical, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
                     throw std::runtime_error("failed to create semaphores");
             }
         }
     }
 
     VkResult SwapChain::aquireFrame(uint32_t& index) {
-        vkWaitForFences(device, 1, &inFlightFences[currentFrameIndex], VK_TRUE, std::numeric_limits<uint64_t>::max());
+        vkWaitForFences(device.logical, 1, &inFlightFences[currentFrameIndex], VK_TRUE, std::numeric_limits<uint64_t>::max());
 
         // get the next available image from the swap chain and signal the semaphore when its available
         // if there is an error we may need to recreate the swap chain.  I.E. Window is resized, etc.
         // we do not recreate swap chain in suboptimal state here because we have already acquired an image.  suboptimal return code is still considered a successful return value
         uint32_t imageIndex = 0;
-        VkResult result = vkAcquireNextImageKHR(device, handle, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
+        VkResult result = vkAcquireNextImageKHR(device.logical, handle, std::numeric_limits<uint64_t>::max(), imageAvailableSemaphores[currentFrameIndex], VK_NULL_HANDLE, &imageIndex);
 
         if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR && result != VK_ERROR_OUT_OF_DATE_KHR) {
             throw std::runtime_error("failed to acquire swap chain image");
@@ -203,7 +203,7 @@ namespace vkdev {
     VkResult SwapChain::drawFrame(uint32_t imageIndex, VkCommandBuffer commandBuffer) {
         // Check if a previous frame is using this image (i.e. there is its fence to wait on)
         if (inFlightImages[imageIndex] != VK_NULL_HANDLE) {
-            vkWaitForFences(device, 1, &inFlightImages[imageIndex], VK_TRUE, UINT64_MAX);
+            vkWaitForFences(device.logical, 1, &inFlightImages[imageIndex], VK_TRUE, UINT64_MAX);
         }
         // Mark the image as now being in use by this frame
         inFlightImages[imageIndex] = inFlightFences[currentFrameIndex];
@@ -227,9 +227,9 @@ namespace vkdev {
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = signalSemaphores;
 
-        vkResetFences(device, 1, &inFlightFences[currentFrameIndex]);
+        vkResetFences(device.logical, 1, &inFlightFences[currentFrameIndex]);
 
-        if (vkQueueSubmit(graphicsQueue->handle, 1, &submitInfo, inFlightFences[currentFrameIndex]) != VK_SUCCESS) {
+        if (vkQueueSubmit(device.graphicsQueue.handle, 1, &submitInfo, inFlightFences[currentFrameIndex]) != VK_SUCCESS) {
             throw std::runtime_error("error submitting draw command");
         }
 
@@ -248,7 +248,7 @@ namespace vkdev {
 
         // returns same error codes as acquiring an image above.
         // in this case we will recreate the swap chain
-        VkResult result = vkQueuePresentKHR(presentationQueue->handle, &presentInfo);
+        VkResult result = vkQueuePresentKHR(device.presentationQueue.handle, &presentInfo);
         if (result != VK_SUCCESS && result != VK_ERROR_OUT_OF_DATE_KHR && result != VK_SUBOPTIMAL_KHR) {
             throw std::runtime_error("failed to present swap chain image");
         }

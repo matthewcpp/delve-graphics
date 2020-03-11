@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vkdev/queue.h"
+#include "vkdev/device.h"
 
 #include <vulkan/vulkan.h>
 
@@ -11,8 +12,8 @@ class SingleUseCommandBuffer;
 // Note that command pools are tied to a specific queue.
 class CommandPool {
 public:
-    CommandPool(VkPhysicalDevice physicalDevice_, VkDevice device_, const Queue& queue_)
-        : physicalDevice(physicalDevice_), device(device_), queue(queue_) {}
+    CommandPool(Device& device_, const Queue& queue_)
+        : device(device_), queue(queue_) {}
 
     VkCommandPool handle = VK_NULL_HANDLE;
     const Queue& queue;
@@ -24,12 +25,12 @@ public:
 
 private:
     VkPhysicalDevice physicalDevice;
-    VkDevice device;
+    Device device;
 };
 
 class SingleUseCommandBuffer {
 public:
-    SingleUseCommandBuffer(const CommandPool& pool_, VkDevice device_): pool(pool_), device(device_) {}
+    SingleUseCommandBuffer(const CommandPool& pool_, Device& device_): pool(pool_), device(device_) {}
 
     void start();
     void submit();
@@ -40,7 +41,7 @@ public:
 
 private:
     const CommandPool& pool;
-    VkDevice device;
+    Device device;
 };
 
 }

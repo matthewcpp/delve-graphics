@@ -4,11 +4,6 @@
 
 namespace vkdev {
 
-void Image::init(VkPhysicalDevice physicalDevice_, VkDevice device_) {
-    physicalDevice = physicalDevice_;
-    device = device_;
-}
-
 void Image::create(uint32_t width_, uint32_t height_, uint32_t mipLevels_, VkSampleCountFlagBits numSamples, VkFormat format_, VkImageTiling tiling, VkImageUsageFlags usageFlags, VkMemoryPropertyFlags memoryPropertyFlags) {
     width = width_;
     height = height_;
@@ -31,23 +26,23 @@ void Image::create(uint32_t width_, uint32_t height_, uint32_t mipLevels_, VkSam
     imageInfo.samples = numSamples;
     imageInfo.flags = 0; // Optional
 
-    if (vkCreateImage(device, &imageInfo, nullptr, &handle) != VK_SUCCESS) {
+    if (vkCreateImage(device.logical, &imageInfo, nullptr, &handle) != VK_SUCCESS) {
         throw std::runtime_error("failed to create image.");
     }
 
     VkMemoryRequirements memoryRequirements;
-    vkGetImageMemoryRequirements(device, handle, &memoryRequirements);
+    vkGetImageMemoryRequirements(device.logical, handle, &memoryRequirements);
 
     VkMemoryAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memoryRequirements.size;
-    allocInfo.memoryTypeIndex = vkdev::Buffer::findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, memoryPropertyFlags);
+    allocInfo.memoryTypeIndex = vkdev::Buffer::findMemoryType(device.physical, memoryRequirements.memoryTypeBits, memoryPropertyFlags);
 
-    if (vkAllocateMemory(device, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
+    if (vkAllocateMemory(device.logical, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
         throw std::runtime_error("failed to allocate image memory");
     }
 
-    vkBindImageMemory(device, handle, memory, 0);
+    vkBindImageMemory(device.logical, handle, memory, 0);
 }
 
 void Image::transitionLayout(CommandPool& commandPool, VkImageLayout oldLayout, VkImageLayout newLayout) {
@@ -146,7 +141,7 @@ void Image::loadBufferData(CommandPool& commandPool, const Buffer& buffer) {
 
 void Image::generateMipmaps(CommandPool& commandPool) {
     VkFormatProperties formatProperties;
-    vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties);
+    vkGetPhysicalDeviceFormatProperties(device.physical, format, &formatProperties);
 
     if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
         throw std::runtime_error("texture image format does not support linear which is required to generate mipmaps");
@@ -259,13 +254,13 @@ VkImageView Image::createView(VkDevice device, VkImage image, VkFormat format, V
 }
 
 void Image::createView(VkImageAspectFlags aspectFlags) {
-    view = Image::createView(device, handle, format, aspectFlags, mipLevels);
+    view = Image::createView(device.logical, handle, format, aspectFlags, mipLevels);
 }
 
 void Image::cleanup() {
-    vkDestroyImageView(device, view, nullptr);
-    vkDestroyImage(device, handle, nullptr);
-    vkFreeMemory(device, memory, nullptr);
+    vkDestroyImageView(device.logical, view, nullptr);
+    vkDestroyImage(device.logical, handle, nullptr);
+    vkFreeMemory(device.logical, memory, nullptr);
 }
 
 }

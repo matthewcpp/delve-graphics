@@ -1,7 +1,8 @@
 #pragma once
 
-#include "buffer.h"
-#include "command.h"
+#include "vkdev/buffer.h"
+#include "vkdev/command.h"
+#include "vkdev/device.h"
 
 #include <vulkan/vulkan.h>
 
@@ -9,16 +10,17 @@ namespace vkdev {
     
 class Image {
 public:
-    VkImage handle;
-    VkDeviceMemory memory;
-    VkImageView view;
+    explicit Image(Device& device_): device(device_) {}
+
+    VkImage handle = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
 
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t mipLevels = 0;
     VkFormat format = VK_FORMAT_UNDEFINED;
 
-    void init(VkPhysicalDevice physicalDevice_, VkDevice device_);
     void create(uint32_t width_, uint32_t height_, uint32_t mipLevels_, VkSampleCountFlagBits numSamples, VkFormat format_, VkImageTiling tiling, VkImageUsageFlags usageFlags, VkMemoryPropertyFlags memoryPropertyFlags);
     void transitionLayout(CommandPool& commandPool, VkImageLayout oldLayout, VkImageLayout newLayout);
     void loadBufferData(CommandPool& commandPool, const Buffer& buffer);
@@ -32,8 +34,7 @@ public:
     static inline bool formatHasStencilComponent(VkFormat format) { return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT; }
 
 private:
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VkDevice device = VK_NULL_HANDLE;
+    Device& device;
 };
 
 }

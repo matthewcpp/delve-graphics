@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <stdexcept>
 #include <string.h>
 
 const std::vector<const char*> requiredValidationLayers = {

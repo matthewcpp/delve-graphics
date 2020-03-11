@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vkdev/queue.h"
+#include "vkdev/device.h"
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
@@ -11,8 +12,7 @@
 namespace vkdev {
     class SwapChain {
     public:
-        SwapChain(VkPhysicalDevice physicalDevice_, VkDevice device_, VkSurfaceKHR surface_, vkdev::Queue* graphicsQueue_, vkdev::Queue* presentationQueue_) :
-            physicalDevice(physicalDevice_), device(device_), surface(surface_), graphicsQueue(graphicsQueue_), presentationQueue(presentationQueue_) {}
+        SwapChain(Device& device_, VkSurfaceKHR surface_): device(device_), surface(surface_) {}
 
         void create(const glm::ivec2& framebufferSize);
         void cleanupImages();
@@ -39,12 +39,8 @@ namespace vkdev {
         size_t currentFrameIndex = 0;
 
     private:
-        VkPhysicalDevice physicalDevice;
-        VkDevice device;
+        Device& device;
         VkSurfaceKHR surface;
-
-        vkdev::Queue* graphicsQueue;
-        vkdev::Queue* presentationQueue;
     };
 
     struct SwapChainSupportInfo {

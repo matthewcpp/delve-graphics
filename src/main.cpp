@@ -37,6 +37,7 @@
 #include <array>
 #include <unordered_map>
 #include <memory>
+#include <thread>
 
 #include <string.h>
 
@@ -947,28 +948,38 @@ private:
     }
 
     void mainLoop() {
+        auto last_update_time = std::chrono::high_resolution_clock::now();
         while (!glfwWindowShouldClose(_glfwWindow)) {
-            glfwPollEvents();
+            auto current_update_time = std::chrono::high_resolution_clock::now();
+            auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(current_update_time - last_update_time).count();
 
-            if (_glfwFramebufferResized) {
-                _glfwFramebufferResized = false;
-                recreateSwapChain();
-            }
-            else {
-                uint32_t frameIndex = 0;
-                VkResult result = swapchain->aquireFrame(frameIndex);
+            if (milliseconds >= 16) {
+                glfwPollEvents();
 
-                if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+                if (_glfwFramebufferResized) {
+                    _glfwFramebufferResized = false;
                     recreateSwapChain();
                 }
                 else {
-                    updateUniformBuffer(frameIndex);
-                    result = swapchain->drawFrame(frameIndex, _commandBuffers[frameIndex]);
+                    uint32_t frameIndex = 0;
+                    VkResult result = swapchain->aquireFrame(frameIndex);
 
-                    if (result != VK_SUCCESS) {
+                    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
                         recreateSwapChain();
                     }
+                    else {
+                        updateUniformBuffer(frameIndex);
+                        result = swapchain->drawFrame(frameIndex, _commandBuffers[frameIndex]);
+
+                        if (result != VK_SUCCESS) {
+                            recreateSwapChain();
+                        }
+                    }
+                    last_update_time = current_update_time;
                 }
+            }
+            else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
 

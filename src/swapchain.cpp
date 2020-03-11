@@ -6,12 +6,6 @@
 #include <stdexcept>
 
 namespace vkdev {
-    struct SwapChainSupportInfo {
-        VkSurfaceCapabilitiesKHR surfaceCapabilities = {};
-        std::vector<VkSurfaceFormatKHR> formats;
-        std::vector<VkPresentModeKHR> presentModes;
-    };
-
     struct QueueFamilyIndices {
         std::optional<uint32_t> graphicsFamily;
         std::optional<uint32_t> presentationFamily; // allows for displaying to a surface
@@ -52,31 +46,6 @@ namespace vkdev {
         return indices;
     }
 
-    SwapChainSupportInfo getSwapChainSupportInfo(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
-        SwapChainSupportInfo info;
-
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &info.surfaceCapabilities);
-
-        uint32_t surfaceFormatCount = 0;
-        vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, nullptr);
-
-        if (surfaceFormatCount > 0) {
-            info.formats.resize(surfaceFormatCount);
-            vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, info.formats.data());
-        }
-
-        uint32_t presentModeCount = 0;
-        vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
-
-        if (presentModeCount > 0) {
-            info.presentModes.resize(presentModeCount);
-            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, info.presentModes.data());
-        }
-
-
-        return info;
-    }
-
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats) {
         for (const auto& availableFormat : availableFormats) {
             if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
@@ -109,7 +78,7 @@ namespace vkdev {
     }
 
     void SwapChain::create(const glm::ivec2& framebufferSize) {
-        SwapChainSupportInfo info = getSwapChainSupportInfo(physicalDevice, surface);
+        SwapChainSupportInfo info = SwapChainSupportInfo::getForDevice(physicalDevice, surface);
 
         auto surfaceFormat = chooseSwapSurfaceFormat(info.formats);
         auto presentMode = chooseSwapPresentMode(info.presentModes);
@@ -287,5 +256,30 @@ namespace vkdev {
         currentFrameIndex = (currentFrameIndex + 1) % vkdev::SwapChain::MAX_SIMULTANEOUS_FRAMES;
 
         return result;
+    }
+
+    SwapChainSupportInfo SwapChainSupportInfo::getForDevice(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface) {
+        SwapChainSupportInfo info;
+
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &info.surfaceCapabilities);
+
+        uint32_t surfaceFormatCount = 0;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, nullptr);
+
+        if (surfaceFormatCount > 0) {
+            info.formats.resize(surfaceFormatCount);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &surfaceFormatCount, info.formats.data());
+        }
+
+        uint32_t presentModeCount = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr);
+
+        if (presentModeCount > 0) {
+            info.presentModes.resize(presentModeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, info.presentModes.data());
+        }
+
+
+        return info;
     }
 }

@@ -46,4 +46,12 @@ namespace vkdev {
         vkdev::Queue* graphicsQueue;
         vkdev::Queue* presentationQueue;
     };
+
+    struct SwapChainSupportInfo {
+        VkSurfaceCapabilitiesKHR surfaceCapabilities;
+        std::vector<VkSurfaceFormatKHR> formats;
+        std::vector<VkPresentModeKHR> presentModes;
+
+        static SwapChainSupportInfo getForDevice(VkPhysicalDevice physicalDevice, VkSurfaceKHR surface);
+    };
 }

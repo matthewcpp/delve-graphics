@@ -4,6 +4,7 @@
 #include "vkdev/buffer.h"
 #include "vkdev/instance.h"
 #include "vkdev/image.h"
+#include "vkdev/mesh.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -14,13 +15,9 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/hash.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
-
-#define TINYOBJLOADER_IMPLEMENTATION
-#include <tiny_obj_loader.h>
 
 #include <chrono>
 
@@ -44,71 +41,13 @@
 constexpr int WIDTH = 800;
 constexpr int HEIGHT = 600;
 
-const std::string MODEL_PATH = "models/chalet.obj";
+const std::string MODEL_PATH = "models/chalet.model";
 const std::string TEXTURE_PATH = "textures/chalet.jpg";
 
-const std::vector<const char*> requiredValidationLayers = {
-    "VK_LAYER_KHRONOS_validation", "VK_LAYER_LUNARG_standard_validation"
-};
 
 const std::vector<std::string> requiredDeviceExtensions = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME
 };
-
-struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
-
-    static VkVertexInputBindingDescription getBindingDescription() {
-        // describes the format of the vertex
-        VkVertexInputBindingDescription bindingDescription = {};
-        bindingDescription.binding = 0;  // describes position in array of bindings
-        bindingDescription.stride = sizeof(Vertex);
-        bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-        return bindingDescription;
-    }
-
-    // attribute descriptions...describe the attributes of the vertex, i.e. position and color,
-    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions = {};
-
-        // describe position
-        attributeDescriptions[0].binding = 0;
-        attributeDescriptions[0].location = 0; //location in the shader ie. layout(LOCATION = 0) etc
-        attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-        //describe vertex color
-        attributeDescriptions[1].binding = 0;
-        attributeDescriptions[1].location = 1;
-        attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-        attributeDescriptions[1].offset = offsetof(Vertex, color);
-
-        //describe tex coords
-        attributeDescriptions[2].binding = 0;
-        attributeDescriptions[2].location = 2;
-        attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
-
-        return attributeDescriptions;
-    }
-
-    bool operator==(const Vertex& other) const {
-        return pos == other.pos && color == other.color && texCoord == other.texCoord;
-    }
-};
-
-namespace std {
-    template<> struct hash<Vertex> {
-        size_t operator()(Vertex const& vertex) const {
-            return ((hash<glm::vec3>()(vertex.pos) ^
-                (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
-                (hash<glm::vec2>()(vertex.texCoord) << 1);
-        }
-    };
-}
 
 // alignas is used to be explicit in regards to vulkan alignment requirements.  mat4 should be aligned to multiples of 16 bytes
 struct UniformBufferObject {
@@ -130,29 +69,6 @@ private:
         if (glfwCreateWindowSurface(instance.handle, _glfwWindow, nullptr, &_surface) != VK_SUCCESS) {
             throw std::runtime_error("failure creating window surface");
         }
-    }
-
-    std::vector<const char*> getSupportedValidationLayers() {
-        uint32_t validationLayerCount = 0;
-        vkEnumerateInstanceLayerProperties(&validationLayerCount, nullptr);
-
-        std::vector<VkLayerProperties> availableLayerProperties(validationLayerCount);
-        vkEnumerateInstanceLayerProperties(&validationLayerCount, availableLayerProperties.data());
-
-        for (const auto& layer : availableLayerProperties) {
-            std::cout << layer.layerName << std::endl;
-        }
-
-        std::vector<const char*> supportedValidationLayers;
-        for (const auto requiredLayerName : requiredValidationLayers) {
-            auto layerProperty = std::find_if(availableLayerProperties.begin(), availableLayerProperties.end(), [requiredLayerName](const VkLayerProperties& property) { return strcmp(property.layerName, requiredLayerName) == 0; });
-
-            if (layerProperty != availableLayerProperties.end()) {
-                supportedValidationLayers.push_back(requiredLayerName);
-            }
-        }
-
-        return supportedValidationLayers;
     }
 
     std::vector<char> readFile(const std::string& path) {
@@ -270,37 +186,13 @@ private:
         }
     }
 
-    void createVertexBuffer() {
-        vertexBuffer = std::make_unique<vkdev::Buffer>(*device);
-        // create a temporary CPU visible staging buffer to copy vertex data to the GPU (device local)
-        const auto bufferSize = static_cast<VkDeviceSize>(sizeof(Vertex) * _vertices.size());
 
-        vkdev::Buffer stagingBuffer{*device};
-        stagingBuffer.createWithData(device->physical, device->logical, _vertices.data(), bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    void loadModel() {
+        vkdev::MeshData meshData;
+        meshData.loadFromFile(MODEL_PATH);
 
-        // create our vertex buffer which will hold data on the GPU
-        vertexBuffer->create(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        // copy the staging buffer to device local buffer
-        vkdev::Buffer::copy(*commandPool, stagingBuffer, *vertexBuffer);
-
-        // cleanup staging buffer
-        stagingBuffer.cleanup();
-    }
-
-    void createIndexBuffer() {
-        indexBuffer = std::make_unique<vkdev::Buffer>(*device);
-        // note current model is using uint32_t for indices
-        //const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint16_t) * indices.size());
-        const auto bufferSize = static_cast<VkDeviceSize>(sizeof(uint32_t) * _indices.size());
-
-        vkdev::Buffer stagingBuffer{*device};
-        stagingBuffer.createWithData(device->physical, device->logical, _indices.data(), bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        indexBuffer->create(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        vkdev::Buffer::copy(*commandPool, stagingBuffer, *indexBuffer);
-
-        stagingBuffer.cleanup();
+        mesh = std::make_unique<vkdev::Mesh>(*device);
+        mesh->create(meshData, *commandPool);
     }
 
     // a uniform buffer in our case is tired to a swap chain image
@@ -443,8 +335,8 @@ private:
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertexStage, fragmentStage };
 
         // get the data structures for binding the array and also describing its attributes.  See vertex struct.
-        const auto bindingDescription = Vertex::getBindingDescription();
-        const auto attributeDescriptions = Vertex::getAttributeDescriptions();
+        const auto bindingDescription = mesh->getBindingDescription();
+        const auto attributeDescriptions = mesh->getAttributeDescriptions();
 
         // describe the input format of vertex data
         VkPipelineVertexInputStateCreateInfo vertexInput = {};
@@ -653,19 +545,19 @@ private:
             vkCmdBeginRenderPass(_commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
             vkCmdBindPipeline(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _graphicsPipeline);
 
-            VkBuffer vertexBuffers[] = { vertexBuffer->buffer };
+            VkBuffer vertexBuffers[] = { mesh->vertexBuffer.buffer };
             VkDeviceSize offsets[] = { 0 };
 
             vkCmdBindVertexBuffers(_commandBuffers[i], 0, 1, vertexBuffers, offsets);
 
             // note that the current sample model has index count > 65535 so we use uint32_t
             //vkCmdBindIndexBuffer(_commandBuffers[i], _indexBuffer, 0, VK_INDEX_TYPE_UINT16);
-            vkCmdBindIndexBuffer(_commandBuffers[i], indexBuffer->buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(_commandBuffers[i], mesh->indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            // descriptor sets are not uniqiue to graphics pipeline.  Therefore we need to specify we are binding to graphics (as opposed to compute)
+            // descriptor sets are not unique to graphics pipeline.  Therefore we need to specify we are binding to graphics (as opposed to compute)
             vkCmdBindDescriptorSets(_commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, _pipelineLayout, 0, 1, &_descriptorSets[i], 0, nullptr);
 
-            vkCmdDrawIndexed(_commandBuffers[i], static_cast<uint32_t>(_indices.size()), 1, 0, 0, 0);
+            vkCmdDrawIndexed(_commandBuffers[i], static_cast<uint32_t>(mesh->elementCount), 1, 0, 0, 0);
 
             vkCmdEndRenderPass(_commandBuffers[i]);
 
@@ -693,7 +585,7 @@ private:
         ubo.proj[1][1] *= -1;
 
         // copy the MVP into the corresponding uniform buffer
-        // TODO: look into using push constants for a more efficent means of passing the uniform data to shaders
+        // TODO: look into using push constants for a more efficient means of passing the uniform data to shaders
         void* data = nullptr;
         vkMapMemory(device->logical, uniformBuffers[bufferIndex].memory, 0, sizeof(ubo), 0, &data);
         memcpy(data, &ubo, sizeof(ubo));
@@ -762,46 +654,7 @@ private:
         depthImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);  // note this is optional in this case
     }
 
-    void loadModel() {
-        tinyobj::attrib_t attrib;
-        std::vector<tinyobj::shape_t> shapes;
-        std::vector<tinyobj::material_t> materials;
-        std::string error;
 
-        if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &error, MODEL_PATH.c_str())) {
-            throw std::runtime_error(error);
-        }
-
-        std::unordered_map<Vertex, uint32_t> uniqueVertices = {};
-
-        for (const auto& shape : shapes) {
-            for (const auto& index : shape.mesh.indices) {
-                Vertex vertex = {};
-
-                vertex.pos = {
-                    attrib.vertices[3 * index.vertex_index + 0],
-                    attrib.vertices[3 * index.vertex_index + 1],
-                    attrib.vertices[3 * index.vertex_index + 2]
-                };
-
-                vertex.texCoord = {
-                    attrib.texcoords[2 * index.texcoord_index + 0],
-                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
-                    // note that texture has been loaded into image format where 0 is at the top of the top of the image
-                    //attrib.texcoords[2 * index.texcoord_index + 1]
-                };
-
-                vertex.color = { 1.0f, 1.0f, 1.0f };
-
-                if (uniqueVertices.count(vertex) == 0) {
-                    uniqueVertices[vertex] = static_cast<uint32_t>(_vertices.size());
-                    _vertices.push_back(vertex);
-                }
-
-                _indices.push_back(uniqueVertices[vertex]);
-            }
-        }
-    }
 
     void createTextureImage() {
         textureImage = std::make_unique<vkdev::Image>(*device);
@@ -903,18 +756,20 @@ private:
         swapchain = std::make_unique<vkdev::SwapChain>(*device, _surface);
         initializeSwapChain();
 
-        createRenderPass();
-        createDescriptorSetLayout();
-        createGraphicsPipeline();
         createCommandPool();
-        createMsaaColorResources();
-        createDepthResources();
-        createFramebuffers();
+
         createTextureImage();
         createTextureSampler();
         loadModel();
-        createVertexBuffer();
-        createIndexBuffer();
+
+        createRenderPass();
+        createDescriptorSetLayout();
+        createGraphicsPipeline();
+
+
+        createMsaaColorResources();
+        createDepthResources();
+        createFramebuffers();
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
@@ -1019,8 +874,7 @@ private:
 
         vkDestroyDescriptorSetLayout(device->logical, _descriptorSetLayout, nullptr);
 
-        indexBuffer->cleanup();
-        vertexBuffer->cleanup();
+        mesh->cleanup();
 
         swapchain->cleanupSyncObjects();
 
@@ -1066,8 +920,7 @@ private:
     std::unique_ptr<vkdev::CommandPool> commandPool;
     std::vector<VkCommandBuffer> _commandBuffers;
 
-    std::unique_ptr<vkdev::Buffer> vertexBuffer;
-    std::unique_ptr<vkdev::Buffer> indexBuffer;
+    std::unique_ptr<vkdev::Mesh> mesh;
 
     std::vector<vkdev::Buffer> uniformBuffers;
 
@@ -1085,9 +938,6 @@ private:
 
     bool _glfwFramebufferResized = false;
     bool _enableValidation = false;
-
-    std::vector<Vertex> _vertices;
-    std::vector<uint32_t> _indices;
 };
 
 int main(int argc, char** argv) {

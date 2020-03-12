@@ -50,7 +50,7 @@ namespace vkdev {
         size = bufferSize;
     }
 
-    void Buffer::createWithData(VkPhysicalDevice physicalDevice_, VkDevice device_, void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
+    void Buffer::createWithData(VkPhysicalDevice physicalDevice_, VkDevice device_, const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
         create(size, usage, properties);
 
         void* mappedData = nullptr;

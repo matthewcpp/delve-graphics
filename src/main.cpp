@@ -3,8 +3,8 @@
 #include "vkdev/device.h"
 #include "vkdev/buffer.h"
 #include "vkdev/instance.h"
-#include "vkdev/image.h"
 #include "vkdev/mesh.h"
+#include "vkdev/texture.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -15,9 +15,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
 
 #include <chrono>
 
@@ -496,11 +493,6 @@ private:
         }
     }
 
-    void createCommandPool() {
-        commandPool = std::make_unique<vkdev::CommandPool>(*device, device->graphicsQueue);
-        commandPool->create();
-    }
-
     // drawing commands involves binding a framebuffer, we will have to record a command buffer for every image in the swap chain.
     // TODO: look into use of secondary command buffer
     void createCommandBuffers() {
@@ -654,51 +646,6 @@ private:
         depthImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);  // note this is optional in this case
     }
 
-
-
-    void createTextureImage() {
-        textureImage = std::make_unique<vkdev::Image>(*device);
-
-        int width, height, numChannels;
-        stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &width, &height, &numChannels, STBI_rgb_alpha);
-        _mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
-
-        if (!pixels) {
-            throw std::runtime_error("failed to load texture image.");
-        }
-
-        // we follow the convention of creating the staging buffer, mapping memory then transferring to destination buffer
-        VkDeviceSize imageSize = width * height * 4;
-        vkdev::Buffer stagingBuffer{*device};
-
-        stagingBuffer.createWithData(device->physical, device->logical, pixels, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        stbi_image_free(pixels);
-
-        // note that since we are generating mipmaps via vkCmdBlitImage we need to inform vulkan that image buffer will be both a source and destination of image operations
-        const VkImageUsageFlags usageFlags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        const VkFormat imageFormat = VK_FORMAT_R8G8B8A8_UNORM;
-
-        textureImage->create(static_cast<uint32_t>(width), static_cast<uint32_t>(height), _mipLevels, VK_SAMPLE_COUNT_1_BIT, imageFormat, VK_IMAGE_TILING_OPTIMAL, usageFlags, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        // note: image was created with undefined layout in createImage function above we will transition the image into a state where it can have the data loaded into it.
-        textureImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        textureImage->loadBufferData(*commandPool, stagingBuffer);
-
-        if (_mipLevels > 1) {
-            // note that this function will transition all mipmap levels to optimal read format.  in lieu of this function, mipmap levels could be loaded in manually
-            textureImage->generateMipmaps(*commandPool);
-        }
-        else {
-            // now that the data is copied into the image, transition it to optimal read format
-            textureImage->transitionLayout(*commandPool, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        }
-
-        textureImage->createView(VK_IMAGE_ASPECT_COLOR_BIT);
-        
-        stagingBuffer.cleanup();
-    }
-
     // texture sampler object will describe how we will sample the texture from within our shader.
     void createTextureSampler() {
         VkSamplerCreateInfo samplerInfo = {};
@@ -756,9 +703,12 @@ private:
         swapchain = std::make_unique<vkdev::SwapChain>(*device, _surface);
         initializeSwapChain();
 
-        createCommandPool();
+        commandPool = std::make_unique<vkdev::CommandPool>(*device, device->graphicsQueue);
+        commandPool->create();
 
-        createTextureImage();
+        vkdev::Image texture = vkdev::Texture::createFromFile(TEXTURE_PATH.c_str(), *device, *commandPool);
+        textureImage = std::make_unique<vkdev::Image>(texture);
+
         createTextureSampler();
         loadModel();
 

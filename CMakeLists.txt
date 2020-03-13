@@ -30,6 +30,7 @@ add_executable(vulkantest
     include/vkdev/mesh.h src/mesh.cpp
     include/vkdev/queue.h src/queue.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
+    include/vkdev/texture.h src/texture.cpp
 )
 set_target_properties(vulkantest PROPERTIES 
     CXX_STANDARD 17

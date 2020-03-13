@@ -5,6 +5,7 @@
 #include "vkdev/instance.h"
 #include "vkdev/mesh.h"
 #include "vkdev/texture.h"
+#include "vkdev/window.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -55,19 +56,6 @@ struct UniformBufferObject {
 
 class VulkanTestApplication {
 private:
-    void initializeSwapChain() {
-        glm::ivec2 framebufferSize;
-        glfwGetFramebufferSize(_glfwWindow, &framebufferSize.x, &framebufferSize.y);
-
-        swapchain->create(framebufferSize);
-    }
-
-    void createSurface() {
-        if (glfwCreateWindowSurface(instance.handle, _glfwWindow, nullptr, &_surface) != VK_SUCCESS) {
-            throw std::runtime_error("failure creating window surface");
-        }
-    }
-
     std::vector<char> readFile(const std::string& path) {
         std::ifstream file(path, std::ios::ate | std::ios::binary);
 
@@ -584,29 +572,6 @@ private:
         vkUnmapMemory(device->logical, uniformBuffers[bufferIndex].memory);
     }
 
-
-    static void glfwFramebufferResizeCallback(GLFWwindow* _glfwWindow, int width, int height) {
-        auto app = reinterpret_cast<VulkanTestApplication*>(glfwGetWindowUserPointer(_glfwWindow));
-        app->_glfwFramebufferResized = true;
-    }
-
-    void initWindow() {
-        auto result = glfwInit();
-        if (result == GLFW_FALSE) {
-            throw std::runtime_error("failed it initialize GLFW.");
-        }
-
-        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);  // Signal GLFW to not create openGL context
-        _glfwWindow = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
-
-        if (!_glfwWindow) {
-            throw std::runtime_error("failed to create GLFW window");
-        }
-
-        glfwSetWindowUserPointer(_glfwWindow, this);
-        glfwSetFramebufferSizeCallback(_glfwWindow, glfwFramebufferResizeCallback);
-    }
-
     VkFormat findSupportedFormat(const std::vector<VkFormat>& candidateFormats, VkImageTiling tiling, VkFormatFeatureFlags features) {
         for (auto candidateFormat : candidateFormats) {
             VkFormatProperties formatProperties;
@@ -691,17 +656,20 @@ private:
         msaaColorImage->createView(VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    void initVulkan() {
-        instance.create(_enableValidation);
+    void init() {
+        window = std::make_unique<vkdev::Window>(instance);
+        window->createWindow(WIDTH, HEIGHT);
 
-        createSurface();
-        device = std::make_unique<vkdev::Device>(instance, _surface);
+        instance.create(_enableValidation);
+        
+        window->createSurface();
+        device = std::make_unique<vkdev::Device>(instance, window->surface);
         device->create(requiredDeviceExtensions);
 
         _msaaSamples = std::min(_msaaSamples, device->getMaxSupportedSampleCount());
 
-        swapchain = std::make_unique<vkdev::SwapChain>(*device, _surface);
-        initializeSwapChain();
+        swapchain = std::make_unique<vkdev::SwapChain>(*device, window->surface);
+        swapchain->create(window->getFramebufferSize());
 
         commandPool = std::make_unique<vkdev::CommandPool>(*device, device->graphicsQueue);
         commandPool->create();
@@ -728,19 +696,13 @@ private:
     }
 
     void recreateSwapChain() {
-        // This code handles the case where glfw is processing a minimize event
-        int width = 0, height = 0;
-        glfwGetFramebufferSize(_glfwWindow, &width, &height);
-        while (width == 0 || height == 0) {
-            glfwGetFramebufferSize(_glfwWindow, &width, &height);
-            glfwWaitEvents();
-        }
+        window->waitForMinimize();
 
         vkDeviceWaitIdle(device->logical);
 
         cleanupSwapChain();
-
-        initializeSwapChain();
+        swapchain->create(window->getFramebufferSize());
+        
         createRenderPass();
         createGraphicsPipeline();
         createMsaaColorResources();
@@ -754,15 +716,15 @@ private:
 
     void mainLoop() {
         auto last_update_time = std::chrono::high_resolution_clock::now();
-        while (!glfwWindowShouldClose(_glfwWindow)) {
+        while (!window->shouldClose()) {
             auto current_update_time = std::chrono::high_resolution_clock::now();
             auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(current_update_time - last_update_time).count();
 
             if (milliseconds >= 16) {
-                glfwPollEvents();
+                window->poll();
 
-                if (_glfwFramebufferResized) {
-                    _glfwFramebufferResized = false;
+                if (window->wasResized()) {
+                    window->markResizeHandled();
                     recreateSwapChain();
                 }
                 else {
@@ -831,20 +793,17 @@ private:
         commandPool->cleanup();
 
         vkDestroyDevice(device->logical, nullptr);
-        vkDestroySurfaceKHR(instance.handle, _surface, nullptr);
+        window->cleanupSurface();
         instance.cleanup();
 
-        if (_glfwWindow) {
-            glfwDestroyWindow(_glfwWindow);
-        }
+        window->cleanupWindow();
 
         glfwTerminate();
     }
 
 public:
     void run() {
-        initWindow();
-        initVulkan();
+        init();
         mainLoop();
         cleanup();
     }
@@ -852,12 +811,10 @@ public:
     inline void enableValidationLayers(bool enableValidation) { _enableValidation = enableValidation; }
 
 private:
-    GLFWwindow* _glfwWindow = nullptr;
-
+    std::unique_ptr<vkdev::Window> window;
     vkdev::Instance instance;
     std::unique_ptr<vkdev::Device> device;
     VkDebugUtilsMessengerEXT _debugMessenger = VK_NULL_HANDLE;
-    VkSurfaceKHR _surface;
 
     std::unique_ptr<vkdev::SwapChain> swapchain;
     std::vector<VkFramebuffer> _swapChainFramebuffers;
@@ -886,7 +843,6 @@ private:
     VkSampleCountFlagBits _msaaSamples = VK_SAMPLE_COUNT_4_BIT;
     std::unique_ptr<vkdev::Image> msaaColorImage;
 
-    bool _glfwFramebufferResized = false;
     bool _enableValidation = false;
 };
 

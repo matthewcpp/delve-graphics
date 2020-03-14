@@ -4,6 +4,8 @@
 #include <stb_image.h>
 
 #include <algorithm>
+#include <stdexcept>
+#include <cmath>
 
 namespace vkdev::Texture {
 

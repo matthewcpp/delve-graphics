@@ -14,8 +14,8 @@ class Device {
 public:
     Device(Instance& instance_, VkSurfaceKHR surface_): instance(instance_), surface(surface_) {}
 
-    VkPhysicalDevice physical;
-    VkDevice logical;
+    VkPhysicalDevice physical = VK_NULL_HANDLE;
+    VkDevice logical = VK_NULL_HANDLE;
 
     void create(const std::vector<std::string>& requiredDeviceExtensions);
     VkSampleCountFlagBits getMaxSupportedSampleCount();

@@ -4,6 +4,7 @@
 #include "vkdev/buffer.h"
 #include "vkdev/instance.h"
 #include "vkdev/mesh.h"
+#include "vkdev/shader.h"
 #include "vkdev/texture.h"
 #include "vkdev/window.h"
 
@@ -56,37 +57,6 @@ struct UniformBufferObject {
 
 class VulkanTestApplication {
 private:
-    std::vector<char> readFile(const std::string& path) {
-        std::ifstream file(path, std::ios::ate | std::ios::binary);
-
-        if (!file.is_open()) {
-            throw std::runtime_error("unable to read file: " + path);
-        }
-
-        size_t fileSize = static_cast<size_t>(file.tellg());
-        std::vector<char> buffer(fileSize);
-
-        file.seekg(0);
-        file.read(buffer.data(), fileSize);
-
-        return buffer;
-    }
-
-    VkShaderModule createShaderModule(const std::vector<char>& code) {
-        VkShaderModuleCreateInfo shaderInfo = {};
-        shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        shaderInfo.codeSize = code.size();
-        shaderInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-        VkShaderModule shaderModule;
-
-        if (vkCreateShaderModule(device->logical, &shaderInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create shader module");
-        }
-
-        return shaderModule;
-    }
-
     void createRenderPass() {
         VkAttachmentDescription colorAttachment = {};
         colorAttachment.format = swapchain->imageFormat;
@@ -298,23 +268,23 @@ private:
     }
 
     void createGraphicsPipeline() {
-        auto vertexShaderCode = readFile("shaders/shader.vert.spv");
-        auto fragmentShaderCode = readFile("shaders/shader.frag.spv");
+        vkdev::ShaderData shaderData;
+        shaderData.loadFiles("shaders/shader.vert.spv", "shaders/shader.frag.spv");
 
-        auto vertexShaderModule = createShaderModule(vertexShaderCode);
-        auto fragmentShaderModule = createShaderModule(fragmentShaderCode);
+        vkdev::Shader shader{ *device };
+        shader.create(shaderData);
 
         // shader stage describes which shader is our vertex / fragment shader
         VkPipelineShaderStageCreateInfo vertexStage = {};
         vertexStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         vertexStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        vertexStage.module = vertexShaderModule;
+        vertexStage.module = shader.vertexShader;
         vertexStage.pName = "main"; // this is the entrypoint for the shader.
 
         VkPipelineShaderStageCreateInfo fragmentStage = {};
         fragmentStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
         fragmentStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        fragmentStage.module = fragmentShaderModule;
+        fragmentStage.module = shader.fragmentShader;
         fragmentStage.pName = "main"; // this is the entrypoint for the shader.
 
         VkPipelineShaderStageCreateInfo shaderStages[] = { vertexStage, fragmentStage };
@@ -455,8 +425,7 @@ private:
             throw std::runtime_error("failed to create graphics pipeline");
         }
 
-        vkDestroyShaderModule(device->logical, vertexShaderModule, nullptr);
-        vkDestroyShaderModule(device->logical, fragmentShaderModule, nullptr);
+        shader.cleanup();
     }
 
     void createFramebuffers() {

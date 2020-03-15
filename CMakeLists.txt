@@ -29,6 +29,7 @@ add_executable(vulkantest
     include/vkdev/instance.h src/instance.cpp
     include/vkdev/mesh.h src/mesh.cpp
     include/vkdev/queue.h src/queue.cpp
+    include/vkdev/shader.h src/shader.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
     include/vkdev/texture.h src/texture.cpp
     include/vkdev/window.h src/window.cpp

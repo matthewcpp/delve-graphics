@@ -18,15 +18,19 @@ find_package(Vulkan REQUIRED)
 find_package(glfw REQUIRED)
 find_package(glm REQUIRED)
 find_package(stb REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 add_executable(vulkantest 
     src/main.cpp
+    include/vkdev/assets.h src/assets.cpp
     include/vkdev/bounds.h
     include/vkdev/buffer.h src/buffer.cpp
     include/vkdev/command.h src/command.cpp
     include/vkdev/device.h src/device.cpp
+    include/vkdev/descriptor.h src/descriptor.cpp
     include/vkdev/image.h src/image.cpp
     include/vkdev/instance.h src/instance.cpp
+    include/vkdev/material.h
     include/vkdev/mesh.h src/mesh.cpp
     include/vkdev/queue.h src/queue.cpp
     include/vkdev/shader.h src/shader.cpp
@@ -38,7 +42,7 @@ set_target_properties(vulkantest PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON)
 
-target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb)
+target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb nlohmann_json::nlohmann_json)
 target_include_directories(vulkantest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_all_shaders.in ${CMAKE_CURRENT_BINARY_DIR}/compile_all_shaders.sh @ONLY)

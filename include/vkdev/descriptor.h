@@ -1,42 +1,38 @@
 #pragma once
 
+#include "vkdev/assets.h"
+#include "vkdev/buffer.h"
+#include "vkdev/device.h"
+#include "vkdev/material.h"
+
 #include <vulkan/vulkan.h>
 
-#include <vector>
+#include <cstdint>
 #include <string>
-#include <map>
-#include <memory>
+#include <vector>
+#include <unordered_map>
 
 namespace vkdev {
-    struct UniformBuffer {
-        UniformBuffer(uint32_t size_): size(size) {}
 
-        uint32_t size;
-        std::vector<VkBuffer> buffers;
-        std::vector< VkDeviceMemory > memory;
-    };
+class Descriptor{
+public:
+    explicit Descriptor(Device& device_): device(device_) {}
+    void create(Material& material, Assets& assets, uint32_t count, uint32_t mipLevels);
+    void cleanup();
 
-    class DescriptorPool {
-    public:
-        DescriptorPool(VkPhysicalDevice physicalDevice_, VkDevice device_, uint32_t descriptorCount_) : 
-            physicalDevice(physicalDevice_), device(device_), descriptorCount(descriptorCount_) {};
+    VkDescriptorPool pool = VK_NULL_HANDLE;
 
-        void addDescriptor(VkDescriptorType type, VkShaderStageFlagBits stage);
-        void addUniformBuffer(const std::string& name, uint32_t size, VkShaderStageFlagBits stage);
+    std::vector<VkDescriptorSet> descriptorSets;
 
-        void create();
-        void cleanup();
+    std::unordered_map<std::string, std::vector<vkdev::Buffer>> uniformBuffers;
+    std::unordered_map<std::string, VkSampler> samplers;
 
-        std::vector<VkDescriptorPoolSize> descriptorSizes;
-        std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
-        std::map< std::string, std::unique_ptr<UniformBuffer>> uniformBuffers;
+private:
+    void createPool(const Shader& shaderInfo, uint32_t count);
+    void createDescriptorSets(Material& material, Assets& assets, uint32_t count, uint32_t mipLevels);
 
-        VkDescriptorPool poolHandle;
-        VkDescriptorSetLayout layoutHandle;
+private:
+    Device& device;
+};
 
-    private:
-        VkPhysicalDevice physicalDevice;
-        VkDevice device;
-        uint32_t descriptorCount;
-    };
 }

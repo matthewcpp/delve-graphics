@@ -1,0 +1,14 @@
+{
+    "attributes": [ "inPosition", "inTexCoord"],
+    "uniforms": [
+        {
+            "name": "UniformBufferObject",
+            "type": "buffer",
+            "size": 192
+        },
+        {
+            "name": "texSampler",
+            "type": "sampler2D"
+        }
+    ]
+}

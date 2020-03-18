@@ -12,6 +12,7 @@ namespace vkdev {
 
 struct Assets {
     std::unordered_map<std::string, std::unique_ptr<vkdev::Mesh>> meshes;
+    std::unordered_map<MeshVertexAttributes, std::unique_ptr<vkdev::MeshDescription>> meshDescriptions;
     std::unordered_map<std::string, std::unique_ptr<vkdev::Image>> textures;
     std::unordered_map<std::string, std::unique_ptr<vkdev::Shader>> shaders;
 

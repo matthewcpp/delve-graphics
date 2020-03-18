@@ -77,6 +77,14 @@ uint32_t Mesh::vertexSize() const {
     return size;
 }
 
+MeshDescription Mesh::getMeshDescription() const {
+    MeshDescription description;
+    description.bindingDescription = getBindingDescription();
+    description.attributeDescriptions = getAttributeDescriptions();
+
+    return description;
+}
+
 VkVertexInputBindingDescription Mesh::getBindingDescription() const {
     // describes the format of the vertex
     VkVertexInputBindingDescription bindingDescription = {};

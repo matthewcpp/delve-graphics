@@ -5,7 +5,7 @@
 
 namespace vkdev {
 
-void SwapChainRenderTarget::create(SwapChain& swapchain, CommandPool& commandPool) {
+void SwapChainRenderTarget::create(SwapChain& swapchain_, CommandPool& commandPool) {
     // this will retrieve the format we will use to create the depth buffer image
     // note that we are requiring that the format support a stencil buffer component
     const VkFormat depthFormat = Image::findSupportedFormat(
@@ -15,27 +15,29 @@ void SwapChainRenderTarget::create(SwapChain& swapchain, CommandPool& commandPoo
         VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
     );
 
-    createImages(swapchain, commandPool, depthFormat);
-    createRenderPass(swapchain, depthFormat);
-    createFramebuffers(swapchain);
+    swapchain = &swapchain_;
+
+    createImages(commandPool, depthFormat);
+    createRenderPass(depthFormat);
+    createFramebuffers();
 }
 
-void SwapChainRenderTarget::createImages(SwapChain& swapchain, CommandPool& commandPool, VkFormat depthFormat) {
+void SwapChainRenderTarget::createImages(CommandPool& commandPool, VkFormat depthFormat) {
     depthImage = std::make_unique<vkdev::Image>(device);
-    depthImage->create(swapchain.extent.width, swapchain.extent.height, 1, msaaSampleCount, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    depthImage->create(swapchain->extent.width, swapchain->extent.height, 1, msaaSampleCount, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     depthImage->createView(VK_IMAGE_ASPECT_DEPTH_BIT);
     depthImage->transitionLayout(commandPool, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);  // note this is optional in this case
 
     // create the multisampled color image buffer.  Note that multisampled images should not have multiple mip levels (enforced by the spec)
     // We are only ever rendering one image at a time, so only one multisampled image is needed
     msaaColorImage = std::make_unique<vkdev::Image>(device);
-    msaaColorImage->create(swapchain.extent.width, swapchain.extent.height, 1, msaaSampleCount, swapchain.imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    msaaColorImage->create(swapchain->extent.width, swapchain->extent.height, 1, msaaSampleCount, swapchain->imageFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     msaaColorImage->createView(VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
-void SwapChainRenderTarget::createRenderPass(SwapChain& swapchain, VkFormat depthFormat) {
+void SwapChainRenderTarget::createRenderPass(VkFormat depthFormat) {
     VkAttachmentDescription colorAttachment = {};
-    colorAttachment.format = swapchain.imageFormat;
+    colorAttachment.format = swapchain->imageFormat;
     colorAttachment.samples = msaaSampleCount; // multisampling
 
     // These apply to color and depth data
@@ -61,7 +63,7 @@ void SwapChainRenderTarget::createRenderPass(SwapChain& swapchain, VkFormat dept
     // this is not required for depth attachments because they are not presented to the screen!
     // If MSAA is disabled then we should not create a resolve attachment.  Doing so will cause validation error
     VkAttachmentDescription colorAttachmentResolve = {};
-    colorAttachmentResolve.format = swapchain.imageFormat;
+    colorAttachmentResolve.format = swapchain->imageFormat;
     colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT; // we need to convert the image to 1 sample per pixel
     colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -117,20 +119,20 @@ void SwapChainRenderTarget::createRenderPass(SwapChain& swapchain, VkFormat dept
     }
 }
 
-void SwapChainRenderTarget::createFramebuffers(SwapChain& swapchain) {
-    framebuffers.resize(swapchain.imageViews.size());
+void SwapChainRenderTarget::createFramebuffers() {
+    framebuffers.resize(swapchain->imageViews.size());
 
-    for (size_t i = 0; i < swapchain.imageViews.size(); i++) {
+    for (size_t i = 0; i < swapchain->imageViews.size(); i++) {
         // The color attachment differs for every swap chain image, but the same depth image can be used by all of them because only a single subpass is running at the same time due to our semaphores
-        std::array<VkImageView, 3> attachments = { msaaColorImage->view, depthImage->view, swapchain.imageViews[i] };
+        std::array<VkImageView, 3> attachments = { msaaColorImage->view, depthImage->view, swapchain->imageViews[i] };
 
         VkFramebufferCreateInfo framebufferInfo = {};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.renderPass = renderPass;
         framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
         framebufferInfo.pAttachments = attachments.data();
-        framebufferInfo.width = swapchain.extent.width;
-        framebufferInfo.height = swapchain.extent.height;
+        framebufferInfo.width = swapchain->extent.width;
+        framebufferInfo.height = swapchain->extent.height;
         framebufferInfo.layers = 1;
 
         if (vkCreateFramebuffer(device.logical, &framebufferInfo, nullptr, &framebuffers[i]) != VK_SUCCESS) {

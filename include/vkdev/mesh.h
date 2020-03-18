@@ -21,6 +21,11 @@ enum MeshVertexAttributes: uint32_t {
     TexCoords = 4
 };
 
+struct MeshDescription {
+    VkVertexInputBindingDescription bindingDescription;
+    std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
+};
+
 struct MeshData {
     MeshVertexAttributes vertexAttributes;
     std::vector<uint8_t> vertexBuffer;
@@ -43,8 +48,7 @@ public:
     void create(const MeshData& meshData, CommandPool& commandPool);
 
     uint32_t vertexSize() const;
-    VkVertexInputBindingDescription getBindingDescription() const;
-    std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() const;
+    MeshDescription getMeshDescription() const;
 
     Buffer vertexBuffer;
     Buffer indexBuffer;
@@ -55,6 +59,10 @@ public:
     uint32_t elementSize = 0;
 
     Bounds bounds;
+
+private:
+    VkVertexInputBindingDescription getBindingDescription() const;
+    std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() const;
 
 private:
     Device device;

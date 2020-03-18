@@ -21,7 +21,7 @@ class SwapChainRenderTarget {
 public:
     explicit SwapChainRenderTarget(Device& device_) : device(device_) {}
 
-    void create(SwapChain& swapchain, CommandPool& commandPool);
+    void create(SwapChain& swapchain_, CommandPool& commandPool);
 
     void cleanup();
 
@@ -29,11 +29,12 @@ public:
     std::vector<VkFramebuffer> framebuffers;
 
     VkSampleCountFlagBits msaaSampleCount = VK_SAMPLE_COUNT_4_BIT;
+    SwapChain* swapchain = nullptr;
 
 private:
-    void createImages(SwapChain& swapchain, CommandPool& commandPool, VkFormat depthFormat);
-    void createRenderPass(SwapChain& swapchain, VkFormat depthFormat);
-    void createFramebuffers(SwapChain& swapchain);
+    void createImages(CommandPool& commandPool, VkFormat depthFormat);
+    void createRenderPass(VkFormat depthFormat);
+    void createFramebuffers();
 
 private:
     Device& device;

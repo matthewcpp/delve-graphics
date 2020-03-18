@@ -127,6 +127,10 @@ void Device::create(const std::vector<std::string>& requiredDeviceExtensions) {
     createLogicalDevice(requiredDeviceExtensions);
 }
 
+void Device::cleanup() {
+    vkDestroyDevice(logical, nullptr);
+}
+
 // we need to find the max samples that are usable by both the color buff AND the depth buffer
 VkSampleCountFlagBits Device::getMaxSupportedSampleCount() {
     VkPhysicalDeviceProperties physicalDeviceProperties;

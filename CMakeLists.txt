@@ -33,6 +33,7 @@ add_executable(vulkantest
     include/vkdev/material.h
     include/vkdev/mesh.h src/mesh.cpp
     include/vkdev/queue.h src/queue.cpp
+    include/vkdev/rendertarget.h src/rendertarget.cpp
     include/vkdev/shader.h src/shader.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
     include/vkdev/texture.h src/texture.cpp

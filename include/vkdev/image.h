@@ -30,7 +30,7 @@ public:
     void cleanup();
 
     static VkImageView createView(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
-    
+    static VkFormat findSupportedFormat(Device& device, const std::vector<VkFormat>& candidateFormats, VkImageTiling tiling, VkFormatFeatureFlags features);
     static inline bool formatHasStencilComponent(VkFormat format) { return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT; }
 
 private:

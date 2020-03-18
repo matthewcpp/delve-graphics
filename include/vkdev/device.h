@@ -18,6 +18,8 @@ public:
     VkDevice logical = VK_NULL_HANDLE;
 
     void create(const std::vector<std::string>& requiredDeviceExtensions);
+    void cleanup();
+
     VkSampleCountFlagBits getMaxSupportedSampleCount();
 
     Queue graphicsQueue;

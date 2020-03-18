@@ -253,6 +253,22 @@ VkImageView Image::createView(VkDevice device, VkImage image, VkFormat format, V
     return imageViewHandle;
 }
 
+VkFormat Image::findSupportedFormat(Device& device, const std::vector<VkFormat>& candidateFormats, VkImageTiling tiling, VkFormatFeatureFlags features) {
+    for (auto candidateFormat : candidateFormats) {
+        VkFormatProperties formatProperties;
+        vkGetPhysicalDeviceFormatProperties(device.physical, candidateFormat, &formatProperties);
+
+        if (tiling == VK_IMAGE_TILING_LINEAR && (formatProperties.linearTilingFeatures & features) == features) {
+            return candidateFormat;
+        }
+        else if (tiling == VK_IMAGE_TILING_OPTIMAL && (formatProperties.optimalTilingFeatures & features) == features) {
+            return candidateFormat;
+        }
+    }
+
+    throw std::runtime_error("failed to find a supported format");
+}
+
 void Image::createView(VkImageAspectFlags aspectFlags) {
     view = Image::createView(device.logical, handle, format, aspectFlags, mipLevels);
 }

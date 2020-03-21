@@ -1,7 +1,7 @@
 #pragma once
 
 #include "vkdev/buffer.h"
-#include "vkdev/command.h"
+#include "vkdev/commandpool.h"
 #include "vkdev/device.h"
 
 #include <vulkan/vulkan.h>

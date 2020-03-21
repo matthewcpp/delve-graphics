@@ -24,7 +24,6 @@ public:
     void cleanup();
 
 private:
-    VkPhysicalDevice physicalDevice;
     Device device;
 };
 
@@ -34,8 +33,6 @@ public:
 
     void start();
     void submit();
-
-    inline bool isStarted() const { return handle != VK_NULL_HANDLE; }
 
     VkCommandBuffer handle = VK_NULL_HANDLE;
 

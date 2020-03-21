@@ -1,6 +1,6 @@
 #pragma once
 
-#include "vkdev/command.h"
+#include "vkdev/commandpool.h"
 #include "vkdev/device.h"
 
 #include <vulkan/vulkan.h>

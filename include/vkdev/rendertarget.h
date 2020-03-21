@@ -1,7 +1,7 @@
 #pragma once
 
 #include "vkdev/assets.h"
-#include "vkdev/command.h"
+#include "vkdev/commandpool.h"
 #include "vkdev/device.h"
 #include "vkdev/swapchain.h"
 

@@ -25,7 +25,7 @@ add_executable(vulkantest
     include/vkdev/assets.h src/assets.cpp
     include/vkdev/bounds.h
     include/vkdev/buffer.h src/buffer.cpp
-    include/vkdev/command.h src/command.cpp
+    include/vkdev/commandpool.h src/commandpool.cpp
     include/vkdev/device.h src/device.cpp
     include/vkdev/descriptor.h src/descriptor.cpp
     include/vkdev/image.h src/image.cpp
@@ -34,6 +34,7 @@ add_executable(vulkantest
     include/vkdev/mesh.h src/mesh.cpp
     include/vkdev/pipeline.h src/pipeline.cpp
     include/vkdev/queue.h src/queue.cpp
+    include/vkdev/rendercommand.h src/rendercommand.cpp
     include/vkdev/rendertarget.h src/rendertarget.cpp
     include/vkdev/shader.h src/shader.cpp
     include/vkdev/swapchain.h src/swapchain.cpp

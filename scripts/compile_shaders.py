@@ -1,6 +1,8 @@
-import sys
 import os
+import shutil
 import subprocess
+import sys
+
 
 def main():
     if len(sys.argv) < 4:
@@ -27,16 +29,23 @@ def main():
         src_path = os.path.join(src_dir, item)
 
         if os.path.isfile(src_path):
-            dst_path = os.path.join(dst_dir, "{}.spv".format(item))
-            print("{} --> {}".format(src_path, dst_path))
-            try:
-                args = [glsl_compiler, src_path, "-o", dst_path]
-                result = subprocess.check_output(args)
-                if len(result) > 0:
-                    print(result)
-            except subprocess.CalledProcessError as compile_error:
-                print(compile_error.output)
-                return 1
+            filename, file_extension = os.path.splitext(item)
+
+            if file_extension == ".glsl":
+                dst_path = os.path.join(dst_dir, "{}.spv".format(filename))
+                print("{} --> {}".format(src_path, dst_path))
+                try:
+                    args = [glsl_compiler, src_path, "-o", dst_path]
+                    result = subprocess.check_output(args)
+                    if len(result) > 0:
+                        print(result)
+                except subprocess.CalledProcessError as compile_error:
+                    print(compile_error.output)
+                    return 1
+            else:
+                dst_path = os.path.join(dst_dir, item)
+                print("{} --> {}".format(src_path, dst_path))
+                shutil.copyfile(src_path, dst_path)
 
 if __name__ == '__main__':
     sys.exit(main())

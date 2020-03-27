@@ -3,7 +3,7 @@
 #include "instance.h"
 #include "queue.h"
 
-#include <vulkan/vulkan.h>
+#include <vk_mem_alloc.h>
 
 #include <vector>
 #include <string>
@@ -16,6 +16,7 @@ public:
 
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice logical = VK_NULL_HANDLE;
+    VmaAllocator allocator = VK_NULL_HANDLE;
 
     void create(const std::vector<std::string>& requiredDeviceExtensions);
     void cleanup();
@@ -28,6 +29,7 @@ public:
 private: 
     void createPhysicalDevice(const std::vector<std::string>& requiredDeviceExtensions);
     void createLogicalDevice(const std::vector<std::string>& requiredDeviceExtensions);
+    void createAllocator();
 
 private:
     Instance& instance;

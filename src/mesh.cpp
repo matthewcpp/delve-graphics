@@ -44,14 +44,14 @@ void Mesh::create(const MeshData& meshData, CommandPool& commandPool) {
     const VkDeviceSize vertexBufferSize = static_cast<VkDeviceSize>(meshData.vertexBuffer.size());
 
     vkdev::Buffer stagingBuffer{ device };
-    stagingBuffer.createWithData(meshData.vertexBuffer.data(), vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    vertexBuffer.create(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    stagingBuffer.createWithData(meshData.vertexBuffer.data(), vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY);
+    vertexBuffer.create(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY );
     vkdev::Buffer::copy(commandPool, stagingBuffer, vertexBuffer);
     stagingBuffer.cleanup();
 
     const VkDeviceSize indexBufferSize = static_cast<VkDeviceSize>(meshData.elementBuffer.size());
-    stagingBuffer.createWithData(meshData.elementBuffer.data(), indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    indexBuffer.create(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    stagingBuffer.createWithData(meshData.elementBuffer.data(), indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY);
+    indexBuffer.create(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_GPU_ONLY);
     vkdev::Buffer::copy(commandPool, stagingBuffer, indexBuffer);
     stagingBuffer.cleanup();
 

@@ -120,7 +120,7 @@ void Image::transitionLayout(CommandPool& commandPool, VkImageLayout oldLayout, 
 void Image::loadBufferData(CommandPool& commandPool, const Buffer& buffer) {
     auto commandBuffer = commandPool.createSingleUseBuffer();
     commandBuffer.start();
-
+    
     VkBufferImageCopy region = {};
     region.bufferOffset = 0; // byte offset in buffer that pixel values start
     region.bufferRowLength = 0; //specifying 0 here means pixels are tightly packed

@@ -122,12 +122,22 @@ void Device::createLogicalDevice(const std::vector<std::string>& requiredDeviceE
     vkGetDeviceQueue(logical, presentationQueue.index, 0, &presentationQueue.handle);
 }
 
+void Device::createAllocator(){
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.physicalDevice = physical;
+    allocatorInfo.device = logical;
+
+    vmaCreateAllocator(&allocatorInfo, &allocator);
+}
+
 void Device::create(const std::vector<std::string>& requiredDeviceExtensions) {
     createPhysicalDevice(requiredDeviceExtensions);
     createLogicalDevice(requiredDeviceExtensions);
+    createAllocator();
 }
 
 void Device::cleanup() {
+    vmaDestroyAllocator(allocator);
     vkDestroyDevice(logical, nullptr);
 }
 

@@ -39,6 +39,7 @@ add_executable(vulkantest
     include/vkdev/shader.h src/shader.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
     include/vkdev/texture.h src/texture.cpp
+    include/vk_mem_alloc.h src/vk_mem_alloc.cpp
     include/vkdev/window.h src/window.cpp
 )
 set_target_properties(vulkantest PROPERTIES 

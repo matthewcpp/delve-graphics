@@ -10,6 +10,9 @@ You will need to have Conan and Cmake installed.
 # Create and enter build directory
 mkdir build && cd build
 
+# Add matthewcpp conan remote
+conan remote add matthewcpp https://api.bintray.com/conan/matthewcpp/conan 
+
 # Install package dependencies from conan
 conan install ..
 

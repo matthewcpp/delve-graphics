@@ -126,6 +126,7 @@ void Device::createAllocator(){
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.physicalDevice = physical;
     allocatorInfo.device = logical;
+    allocatorInfo.instance = instance.handle;
 
     vmaCreateAllocator(&allocatorInfo, &allocator);
 }

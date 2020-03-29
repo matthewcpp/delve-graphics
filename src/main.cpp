@@ -129,9 +129,10 @@ private:
         // TODO: look into using push constants for a more efficient means of passing the uniform data to shaders
         auto& uniformBufferVector = descriptor->uniformBuffers["UniformBufferObject"];
         void* data = nullptr;
-        vkMapMemory(device->logical, uniformBufferVector[bufferIndex].memory, 0, sizeof(ubo), 0, &data);
+
+        vmaMapMemory(device->allocator, uniformBufferVector[bufferIndex].allocation, &data);
         memcpy(data, &ubo, sizeof(ubo));
-        vkUnmapMemory(device->logical, uniformBufferVector[bufferIndex].memory);
+        vmaUnmapMemory(device->allocator, uniformBufferVector[bufferIndex].allocation);
     }
 
     void init() {

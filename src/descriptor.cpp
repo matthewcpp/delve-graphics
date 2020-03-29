@@ -103,7 +103,7 @@ void Descriptor::createDescriptorSets(Material& material, Assets& assets, uint32
                 // create the actual backing buffers that will hold the data accessed by the shader
                 for (uint32_t i = 0; i < count; i++) {
                     auto& uniformBuffer = uniformBufferVector.emplace_back(device);
-                    uniformBuffer.create(uniform.size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+                    uniformBuffer.create(uniform.size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VmaMemoryUsage::VMA_MEMORY_USAGE_CPU_ONLY);
                 }
 
                 // create the bufferInfo struct for this buffer

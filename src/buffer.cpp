@@ -18,45 +18,29 @@ namespace vkdev {
         throw std::runtime_error("failed to find suitable memory type!");
     }
 
-    void Buffer::create(VkDeviceSize bufferSize, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
+    void Buffer::create(VkDeviceSize bufferSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
         VkBufferCreateInfo vertexBufferInfo = {};
         vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         vertexBufferInfo.size = bufferSize; // buffer size in bytes
         vertexBufferInfo.usage = usage;
         vertexBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        if (vkCreateBuffer(device.logical, &vertexBufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create vertex buffer");
-        }
+        VmaAllocationCreateInfo allocInfo = {};
+        allocInfo.usage = memoryUsage;
 
-        VkMemoryRequirements memoryRequirements;
-        vkGetBufferMemoryRequirements(device.logical, buffer, &memoryRequirements);
-
-        // describe the memory we want to allocate into the buffer
-        VkMemoryAllocateInfo allocInfo = {};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memoryRequirements.size;
-        allocInfo.memoryTypeIndex = findMemoryType(device.physical, memoryRequirements.memoryTypeBits, properties);
-
-        if (vkAllocateMemory(device.logical, &allocInfo, nullptr, &memory) != VK_SUCCESS) {
-            throw std::runtime_error("failed to allocate vertex buffer memory.");
-        }
-
-        //now that memory is allocated, associate it with vertex buffer we just made above
-        if (vkBindBufferMemory(device.logical, buffer, memory, 0) != VK_SUCCESS) {
-            throw std::runtime_error("failed to bind memory to buffer");
-        }
-
+        vmaCreateBuffer(device.allocator, &vertexBufferInfo, &allocInfo, &buffer, &allocation, nullptr);
         size = bufferSize;
     }
 
-    void Buffer::createWithData(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties) {
-        create(size, usage, properties);
+    void Buffer::createWithData(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
+        create(size, usage, memoryUsage);
 
         void* mappedData = nullptr;
-        vkMapMemory(device.logical, memory, 0, size, 0, &mappedData);
+        vmaMapMemory(device.allocator, allocation, &mappedData);
+        // vkMapMemory(device.logical, memory, 0, size, 0, &mappedData);
         memcpy(mappedData, data, static_cast<size_t>(size));
-        vkUnmapMemory(device.logical, memory);
+        // vkUnmapMemory(device.logical, memory);
+        vmaUnmapMemory(device.allocator, allocation);
     }
 
     // copying a vertex buffer requires a transfer command.  We will need to create a temporary command buffer to execute the command
@@ -80,7 +64,6 @@ namespace vkdev {
     }
 
     void Buffer::cleanup() {
-        vkDestroyBuffer(device.logical, buffer, nullptr);
-        vkFreeMemory(device.logical, memory, nullptr);
+        vmaDestroyBuffer(device.allocator, buffer, allocation);
     }
 }

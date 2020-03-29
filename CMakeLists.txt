@@ -19,6 +19,7 @@ find_package(glfw REQUIRED)
 find_package(glm REQUIRED)
 find_package(stb REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(VulkanMemoryAllocator REQUIRED)
 
 add_executable(vulkantest 
     src/main.cpp
@@ -39,13 +40,14 @@ add_executable(vulkantest
     include/vkdev/shader.h src/shader.cpp
     include/vkdev/swapchain.h src/swapchain.cpp
     include/vkdev/texture.h src/texture.cpp
+    src/vk_mem_alloc.cpp
     include/vkdev/window.h src/window.cpp
 )
 set_target_properties(vulkantest PROPERTIES 
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON)
 
-target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb nlohmann_json::nlohmann_json)
+target_link_libraries(vulkantest Vulkan::Vulkan glfw::glfw glm::glm stb::stb nlohmann_json::nlohmann_json VulkanMemoryAllocator::VulkanMemoryAllocator)
 target_include_directories(vulkantest PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/scripts/compile_all_shaders.in ${CMAKE_CURRENT_BINARY_DIR}/compile_all_shaders.sh @ONLY)

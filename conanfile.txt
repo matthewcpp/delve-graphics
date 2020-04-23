@@ -3,7 +3,7 @@ glfw/3.3@bincrafters/stable
 glm/0.9.9.5@g-truc/stable
 stb/20190512@conan/stable
 nlohmann_json/3.7.3
-VulkanMemoryAllocator/03252020@matthewcpp/master
+VulkanMemoryAllocator/25d9b2c@matthewcpp/master
 
 [generators]
 cmake_find_package
